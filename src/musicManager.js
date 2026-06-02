@@ -9,61 +9,88 @@ import {
 } from '@discordjs/voice';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import path from 'node:path';
 import process from 'node:process';
 import { createOpusStream } from './stream.js';
 import { store } from './store.js';
+import { getNextProxy, reportSuccess, reportFailure, PROXY_POOL } from './proxy.js';
 
 const execFileAsync = promisify(execFile);
-const require = createRequire(import.meta.url);
 
-function resolveYtDlpPath() {
-  const pkgJson = require.resolve('youtube-dl-exec/package.json');
-  const pkgDir = path.dirname(pkgJson);
-  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-  return path.join(pkgDir, 'bin', binName);
-}
-
-const YT_DLP = resolveYtDlpPath();
-const YT_PROXY = process.env.YT_PROXY;
+// Use system-installed yt-dlp (must be in PATH on the VPS).
+const YT_DLP = process.env.YT_DLP_PATH || 'yt-dlp';
 const COOKIES_FILE = process.env.YT_COOKIES_FILE;
 
-function baseArgs() {
+function baseArgs(proxy) {
   const args = [];
-  if (YT_PROXY) args.push('--proxy', YT_PROXY);
+  if (proxy) args.push('--proxy', proxy);
   if (COOKIES_FILE && existsSync(COOKIES_FILE)) args.push('--cookies', COOKIES_FILE);
-  args.push('--extractor-args', 'youtube:player_client=default,web_safari,android');
+  args.push('--extractor-args', 'youtube:player_client=ios,android,web_safari');
   return args;
 }
 
 /**
  * Run yt-dlp with JSON output and return parsed result(s).
+ * Retries automatically using the proxy pool if it fails.
  */
 async function ytDlpJson(args) {
-  const { stdout } = await execFileAsync(YT_DLP, [
-    '--dump-json',
-    '--no-warnings',
-    '--no-playlist',
-    ...baseArgs(),
-    ...args,
-  ], { windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
-  // yt-dlp outputs one JSON object per line (for playlists).
-  const lines = stdout.trim().split('\n');
-  return lines.map((l) => JSON.parse(l));
+  const maxAttempts = PROXY_POOL.length > 0 ? Math.min(5, PROXY_POOL.length) : 1;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proxy = getNextProxy();
+    try {
+      const { stdout } = await execFileAsync(YT_DLP, [
+        '--dump-json',
+        '--no-warnings',
+        '--no-playlist',
+        ...baseArgs(proxy),
+        ...args,
+      ], { windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+      
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      reportSuccess(proxy);
+      return lines.map((l) => JSON.parse(l));
+    } catch (err) {
+      console.warn(`[ytDlpJson] Attempt ${attempt}/${maxAttempts} failed using proxy ${proxy || 'Direct/None'}: ${err.message}`);
+      reportFailure(proxy);
+      lastError = err;
+      
+      if (attempt === maxAttempts) {
+        throw new Error(`Failed to resolve video metadata after ${maxAttempts} attempts: ${lastError.message}`);
+      }
+    }
+  }
 }
 
 async function ytDlpPlaylist(url) {
-  const { stdout } = await execFileAsync(YT_DLP, [
-    '--dump-json',
-    '--flat-playlist',
-    '--no-warnings',
-    ...baseArgs(),
-    url,
-  ], { windowsHide: true, maxBuffer: 50 * 1024 * 1024 });
-  const lines = stdout.trim().split('\n');
-  return lines.map((l) => JSON.parse(l));
+  const maxAttempts = PROXY_POOL.length > 0 ? Math.min(5, PROXY_POOL.length) : 1;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proxy = getNextProxy();
+    try {
+      const { stdout } = await execFileAsync(YT_DLP, [
+        '--dump-json',
+        '--flat-playlist',
+        '--no-warnings',
+        ...baseArgs(proxy),
+        url,
+      ], { windowsHide: true, maxBuffer: 50 * 1024 * 1024 });
+      
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      reportSuccess(proxy);
+      return lines.map((l) => JSON.parse(l));
+    } catch (err) {
+      console.warn(`[ytDlpPlaylist] Attempt ${attempt}/${maxAttempts} failed using proxy ${proxy || 'Direct/None'}: ${err.message}`);
+      reportFailure(proxy);
+      lastError = err;
+      
+      if (attempt === maxAttempts) {
+        throw new Error(`Failed to resolve playlist metadata after ${maxAttempts} attempts: ${lastError.message}`);
+      }
+    }
+  }
 }
 
 /**
