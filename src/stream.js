@@ -16,26 +16,15 @@ function resolveYtDlpPath() {
 
 const YT_DLP = resolveYtDlpPath();
 
-// --- Anti-bot / authentication options (important on VPS / datacenter IPs) ---
-//
-// YouTube blocks datacenter IPs with "Sign in to confirm you're not a bot".
-// If the server IP itself is flagged, route yt-dlp through a residential proxy:
-//   - YT_PROXY: e.g. http://user:pass@host:port or socks5://user:pass@host:port
-//
-// Cookies can still help when the proxy/IP is allowed:
-//   - YT_COOKIES_FILE: absolute path to a Netscape-format cookies.txt
-//   - YT_COOKIES_FROM_BROWSER: e.g. "chrome", "firefox" (only useful if a
-//     browser profile exists on the machine, which it usually doesn't on a VPS)
-//
-// We also pass player_client args that can help bypass the check without cookies.
-const YT_PROXY = process.env.YT_PROXY;
+import { getNextProxy, PROXY_POOL } from './proxy.js';
+
 const COOKIES_FILE = process.env.YT_COOKIES_FILE;
 const COOKIES_FROM_BROWSER = process.env.YT_COOKIES_FROM_BROWSER;
 
-function authArgs() {
+function authArgs(proxy) {
   const args = [];
-  if (YT_PROXY) {
-    args.push('--proxy', YT_PROXY);
+  if (proxy) {
+    args.push('--proxy', proxy);
   }
 
   if (COOKIES_FILE) {
@@ -48,22 +37,21 @@ function authArgs() {
     args.push('--cookies-from-browser', COOKIES_FROM_BROWSER);
   }
   // Prefer player clients that are less likely to trigger the bot check.
-  args.push('--extractor-args', 'youtube:player_client=default,web_safari,android');
+  // Using both ios and android/safari clients helps with compatibility.
+  args.push('--extractor-args', 'youtube:player_client=ios,android,web_safari');
   return args;
 }
 
 /**
  * Spawn yt-dlp to download the best audio for a video and stream it to stdout.
- * yt-dlp performs the authenticated fetch (using cookies if provided), which
- * is far more reliable on a VPS than letting FFmpeg fetch a googlevideo URL.
  */
-function spawnYtDlp(videoUrl) {
+function spawnYtDlp(videoUrl, proxy) {
   const args = [
     '-f', 'bestaudio/best',
     '--no-playlist',
     '--no-warnings',
     '--quiet',
-    ...authArgs(),
+    ...authArgs(proxy),
     '-o', '-', // write the media to stdout
     videoUrl,
   ];
@@ -74,110 +62,141 @@ function spawnYtDlp(videoUrl) {
  * Create an Ogg/Opus stream for a YouTube video, optionally seeking to
  * `seekSeconds`. Returns { stream, cleanup }.
  *
- * Pipeline: yt-dlp (authenticated download) -> FFmpeg (encode to Ogg/Opus).
- * Discord plays Opus natively, so we avoid a lossy re-encode and get good audio.
+ * Rotates through the residential proxy pool automatically if a block is detected.
  */
 export async function createOpusStream(videoUrl, seekSeconds = 0) {
-  const ytdlp = spawnYtDlp(videoUrl);
+  const maxAttempts = PROXY_POOL.length > 0 ? Math.min(5, PROXY_POOL.length) : 1;
+  let lastError = null;
 
-  // Collect yt-dlp's stderr so we can report a useful error (e.g. bot check).
-  let ytErr = '';
-  ytdlp.stderr.on('data', (d) => {
-    ytErr = (ytErr + d.toString()).slice(-2000);
-  });
-  ytdlp.on('error', (e) => console.error('yt-dlp spawn error:', e.message));
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const proxy = getNextProxy();
+    console.log(`[Stream] Attempt ${attempt}/${maxAttempts} for ${videoUrl} using proxy: ${proxy || 'Direct/None'}`);
 
-  const ffmpegArgs = [];
-  // Input seeking before -i. With a pipe this isn't a fast range seek, but it
-  // still works (FFmpeg decodes and discards up to the target).
-  if (seekSeconds > 0) {
-    ffmpegArgs.push('-ss', String(seekSeconds));
-  }
-  ffmpegArgs.push(
-    '-i', 'pipe:0',
-    '-vn',
-    '-loglevel', 'error',
-    '-c:a', 'libopus',
-    '-b:a', '128k',
-    '-ar', '48000',
-    '-ac', '2',
-    '-vbr', 'on',
-    '-application', 'audio',
-    '-frame_duration', '20',
-    '-f', 'ogg',
-    'pipe:1',
-  );
+    let ytdlp = null;
+    let ffmpeg = null;
+    let cleanupCalled = false;
 
-  const ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
-    windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  ffmpeg.on('error', (e) => console.error('FFmpeg spawn error:', e.message));
-
-  let ffErr = '';
-  ffmpeg.stderr.on('data', (d) => {
-    ffErr = (ffErr + d.toString()).slice(-1000);
-  });
-  ffmpeg.on('close', (code) => {
-    if (code && code !== 0 && code !== 255) {
-      console.error(`FFmpeg exited with code ${code}:`, ffErr.trim().slice(-400));
-    }
-  });
-
-  // Pipe yt-dlp's audio into FFmpeg's stdin.
-  ytdlp.stdout.pipe(ffmpeg.stdin);
-  // Ignore EPIPE when FFmpeg closes stdin early (e.g. on skip/stop).
-  ffmpeg.stdin.on('error', () => {});
-
-  const cleanup = () => {
-    for (const proc of [ytdlp, ffmpeg]) {
-      if (proc && !proc.killed) {
-        try {
-          proc.kill('SIGKILL');
-        } catch {
-          // ignore
+    const cleanup = () => {
+      if (cleanupCalled) return;
+      cleanupCalled = true;
+      for (const proc of [ytdlp, ffmpeg]) {
+        if (proc && !proc.killed) {
+          try {
+            proc.kill('SIGKILL');
+          } catch {
+            // ignore
+          }
         }
       }
-    }
-  };
-
-  ffmpeg.stdout.on('close', cleanup);
-
-  // Gate: only succeed once yt-dlp actually starts producing audio. If yt-dlp
-  // exits before emitting any data (e.g. the bot check), reject with a clear
-  // error instead of handing an empty stream to FFmpeg (which would spin).
-  await new Promise((resolve, reject) => {
-    let settled = false;
-
-    const onData = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
     };
 
-    const onClose = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      const msg = ytErr.trim();
-      if (/not a bot|Sign in to confirm/i.test(msg)) {
-        reject(
-          new Error(
-            'YouTube blocked this request with a bot check. If this server IP is flagged, ' +
-              'set YT_PROXY to a residential proxy and keep YT_COOKIES_FILE configured ' +
-              'with cookies from a logged-in YouTube account.',
-          ),
-        );
-      } else {
-        reject(new Error(`Could not fetch audio: ${msg.slice(-200) || 'yt-dlp failed'}`));
+    try {
+      ytdlp = spawnYtDlp(videoUrl, proxy);
+
+      // Collect yt-dlp's stderr so we can report a useful error (e.g. bot check).
+      let ytErr = '';
+      ytdlp.stderr.on('data', (d) => {
+        ytErr = (ytErr + d.toString()).slice(-2000);
+      });
+      ytdlp.on('error', (e) => console.error('yt-dlp spawn error:', e.message));
+
+      const ffmpegArgs = [];
+      // Input seeking before -i. With a pipe this isn't a fast range seek, but it
+      // still works (FFmpeg decodes and discards up to the target).
+      if (seekSeconds > 0) {
+        ffmpegArgs.push('-ss', String(seekSeconds));
       }
-    };
+      ffmpegArgs.push(
+        '-i', 'pipe:0',
+        '-vn',
+        '-loglevel', 'error',
+        '-c:a', 'libopus',
+        '-b:a', '128k',
+        '-ar', '48000',
+        '-ac', '2',
+        '-vbr', 'on',
+        '-application', 'audio',
+        '-frame_duration', '20',
+        '-f', 'ogg',
+        'pipe:1',
+      );
 
-    // Observe the first data chunk without consuming it (pipe still forwards it).
-    ytdlp.stdout.on('data', onData);
-    ytdlp.once('close', onClose);
-  });
+      ffmpeg = spawn(ffmpegPath, ffmpegArgs, {
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
 
-  return { stream: ffmpeg.stdout, cleanup };
+      ffmpeg.on('error', (e) => console.error('FFmpeg spawn error:', e.message));
+
+      let ffErr = '';
+      ffmpeg.stderr.on('data', (d) => {
+        ffErr = (ffErr + d.toString()).slice(-1000);
+      });
+      ffmpeg.on('close', (code) => {
+        if (code && code !== 0 && code !== 255) {
+          console.error(`FFmpeg exited with code ${code}:`, ffErr.trim().slice(-400));
+        }
+      });
+
+      // Pipe yt-dlp's audio into FFmpeg's stdin.
+      ytdlp.stdout.pipe(ffmpeg.stdin);
+      // Ignore EPIPE when FFmpeg closes stdin early (e.g. on skip/stop).
+      ffmpeg.stdin.on('error', () => {});
+
+      ffmpeg.stdout.on('close', cleanup);
+
+      // Gate: only succeed once yt-dlp actually starts producing audio. If yt-dlp
+      // exits before emitting any data (e.g. the bot check), reject with a clear
+      // error instead of handing an empty stream to FFmpeg (which would spin).
+      await new Promise((resolve, reject) => {
+        let settled = false;
+
+        const onData = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+
+        const onClose = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          const msg = ytErr.trim();
+          if (/not a bot|Sign in to confirm/i.test(msg)) {
+            reject(
+              new Error(
+                `YouTube blocked this request with a bot check (Proxy: ${proxy || 'Direct/None'}).`
+              )
+            );
+          } else {
+            reject(
+              new Error(
+                `Could not fetch audio: ${msg.slice(-200) || 'yt-dlp failed'} (Proxy: ${proxy || 'Direct/None'}).`
+              )
+            );
+          }
+        };
+
+        // Observe the first data chunk without consuming it (pipe still forwards it).
+        ytdlp.stdout.on('data', onData);
+        ytdlp.once('close', onClose);
+      });
+
+      return { stream: ffmpeg.stdout, cleanup };
+
+    } catch (err) {
+      console.warn(`[Stream] Attempt ${attempt} failed with proxy ${proxy || 'Direct/None'}: ${err.message}`);
+      lastError = err;
+      cleanup();
+
+      // If this is the last attempt, bubble up the error
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `All ${maxAttempts} streaming attempts failed. ` +
+          `Last error: ${lastError.message}. ` +
+          `Please check your residential proxies in YT_PROXY.`
+        );
+      }
+    }
+  }
 }
