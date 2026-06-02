@@ -7,45 +7,101 @@ import {
   entersState,
   StreamType,
 } from '@discordjs/voice';
-import play from 'play-dl';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
 import { createOpusStream } from './stream.js';
 import { store } from './store.js';
 
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+
+function resolveYtDlpPath() {
+  const pkgJson = require.resolve('youtube-dl-exec/package.json');
+  const pkgDir = path.dirname(pkgJson);
+  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+  return path.join(pkgDir, 'bin', binName);
+}
+
+const YT_DLP = resolveYtDlpPath();
+const YT_PROXY = process.env.YT_PROXY;
+const COOKIES_FILE = process.env.YT_COOKIES_FILE;
+
+function baseArgs() {
+  const args = [];
+  if (YT_PROXY) args.push('--proxy', YT_PROXY);
+  if (COOKIES_FILE && existsSync(COOKIES_FILE)) args.push('--cookies', COOKIES_FILE);
+  args.push('--extractor-args', 'youtube:player_client=default,web_safari,android');
+  return args;
+}
+
+/**
+ * Run yt-dlp with JSON output and return parsed result(s).
+ */
+async function ytDlpJson(args) {
+  const { stdout } = await execFileAsync(YT_DLP, [
+    '--dump-json',
+    '--no-warnings',
+    '--no-playlist',
+    ...baseArgs(),
+    ...args,
+  ], { windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+  // yt-dlp outputs one JSON object per line (for playlists).
+  const lines = stdout.trim().split('\n');
+  return lines.map((l) => JSON.parse(l));
+}
+
+async function ytDlpPlaylist(url) {
+  const { stdout } = await execFileAsync(YT_DLP, [
+    '--dump-json',
+    '--flat-playlist',
+    '--no-warnings',
+    ...baseArgs(),
+    url,
+  ], { windowsHide: true, maxBuffer: 50 * 1024 * 1024 });
+  const lines = stdout.trim().split('\n');
+  return lines.map((l) => JSON.parse(l));
+}
+
 /**
  * Resolve a YouTube / YouTube Music URL or search term into one or more tracks.
+ * Uses yt-dlp for all lookups so everything goes through the proxy.
  * Returns { tracks: [{ url, title, durationInSec }], label }.
  */
 export async function resolveTracks(query, requestedBy) {
-  const validation = await play.validate(query);
+  const isPlaylist = /[?&]list=/.test(query);
 
-  if (validation === 'yt_playlist') {
-    const playlist = await play.playlist_info(query, { incomplete: true });
-    const videos = await playlist.all_videos();
-    const tracks = videos.map((v) => ({
-      url: v.url,
-      title: v.title,
-      durationInSec: v.durationInSec,
+  if (isPlaylist) {
+    const entries = await ytDlpPlaylist(query);
+    const tracks = entries.map((e) => ({
+      url: e.url || `https://www.youtube.com/watch?v=${e.id}`,
+      title: e.title || 'Unknown',
+      durationInSec: e.duration ?? 0,
       requestedBy,
     }));
-    return { tracks, label: `${tracks.length} tracks from playlist "${playlist.title}"` };
+    const playlistTitle = entries[0]?.playlist_title || 'playlist';
+    return { tracks, label: `${tracks.length} tracks from playlist "${playlistTitle}"` };
   }
 
-  if (validation === 'search' || validation === false) {
-    const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
-    if (!results.length) throw new Error('No results found for that query.');
-    const v = results[0];
-    return {
-      tracks: [{ url: v.url, title: v.title, durationInSec: v.durationInSec, requestedBy }],
-      label: v.title,
-    };
-  }
+  // If it looks like a URL, get info directly. Otherwise search.
+  const isUrl = /^https?:\/\//.test(query);
+  const args = isUrl ? [query] : [`ytsearch1:${query}`];
 
-  // yt_video, yt_music link, or any direct video url.
-  const info = await play.video_basic_info(query);
-  const d = info.video_details;
+  const results = await ytDlpJson(args);
+  if (!results.length) throw new Error('No results found for that query.');
+
+  const v = results[0];
   return {
-    tracks: [{ url: d.url, title: d.title, durationInSec: d.durationInSec, requestedBy }],
-    label: d.title,
+    tracks: [{
+      url: v.webpage_url || v.url || query,
+      title: v.title || 'Unknown',
+      durationInSec: v.duration ?? 0,
+      requestedBy,
+    }],
+    label: v.title || 'Unknown',
   };
 }
 

@@ -19,17 +19,25 @@ const YT_DLP = resolveYtDlpPath();
 // --- Anti-bot / authentication options (important on VPS / datacenter IPs) ---
 //
 // YouTube blocks datacenter IPs with "Sign in to confirm you're not a bot".
-// The reliable fix is to supply cookies from a logged-in YouTube account:
+// If the server IP itself is flagged, route yt-dlp through a residential proxy:
+//   - YT_PROXY: e.g. http://user:pass@host:port or socks5://user:pass@host:port
+//
+// Cookies can still help when the proxy/IP is allowed:
 //   - YT_COOKIES_FILE: absolute path to a Netscape-format cookies.txt
 //   - YT_COOKIES_FROM_BROWSER: e.g. "chrome", "firefox" (only useful if a
 //     browser profile exists on the machine, which it usually doesn't on a VPS)
 //
 // We also pass player_client args that can help bypass the check without cookies.
+const YT_PROXY = process.env.YT_PROXY;
 const COOKIES_FILE = process.env.YT_COOKIES_FILE;
 const COOKIES_FROM_BROWSER = process.env.YT_COOKIES_FROM_BROWSER;
 
 function authArgs() {
   const args = [];
+  if (YT_PROXY) {
+    args.push('--proxy', YT_PROXY);
+  }
+
   if (COOKIES_FILE) {
     if (existsSync(COOKIES_FILE)) {
       args.push('--cookies', COOKIES_FILE);
@@ -156,9 +164,9 @@ export async function createOpusStream(videoUrl, seekSeconds = 0) {
       if (/not a bot|Sign in to confirm/i.test(msg)) {
         reject(
           new Error(
-            'YouTube blocked this request with a bot check. On a VPS you must ' +
-              'provide cookies: set YT_COOKIES_FILE to a cookies.txt from a ' +
-              'logged-in YouTube account.',
+            'YouTube blocked this request with a bot check. If this server IP is flagged, ' +
+              'set YT_PROXY to a residential proxy and keep YT_COOKIES_FILE configured ' +
+              'with cookies from a logged-in YouTube account.',
           ),
         );
       } else {

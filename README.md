@@ -4,16 +4,16 @@ A Node.js Discord bot that plays audio from YouTube / YouTube Music links (or se
 
 ## Features
 
-- **`/play <link or search>`** — queue and play from a YouTube / YouTube Music link or a search term.
-- **`/controls`** — open your own control panel with buttons: play/pause, skip, ⏪ -15s, ⏩ +15s, ⏹️ stop, ⏱️ seek-to (exact position via a popup), and 🔄 refresh.
-- **Per-user panels** — every panel is an *ephemeral* message, so only the person who opened it can see it.
-- **Live progress bar** — the panel shows the current position, a seek bar, and total duration (press 🔄 to refresh it).
-- **Role-gated access** — only members with `ACCESS_ROLE_ID` can use the bot at all.
-- **Priority lock** — when a member with `PRIORITY_ROLE_ID` plays music, everyone else is blocked from controlling playback until that member presses **Stop** or leaves the voice channel. Then controls open up again automatically.
+- **`/play <link or search>`** - queue and play from a YouTube / YouTube Music link or a search term.
+- **`/controls`** - open your own control panel with buttons: play/pause, skip, -15s, +15s, stop, seek-to, and refresh.
+- **Per-user panels** - every panel is an *ephemeral* message, so only the person who opened it can see it.
+- **Live progress bar** - the panel shows the current position, a seek bar, and total duration.
+- **Role-gated access** - only members with `ACCESS_ROLE_ID` can use the bot at all.
+- **Priority lock** - when a member with `PRIORITY_ROLE_ID` plays music, everyone else is blocked from controlling playback until that member presses **Stop** or leaves the voice channel. Then controls open up again automatically.
 
 ## "Skipping ads"
 
-This bot does not need an ad blocker. It uses [`play-dl`](https://github.com/play-dl/play-dl) to extract the clean audio stream directly from YouTube's media endpoints, so the audio it plays does not contain video ads. There is no in-stream ad to skip.
+This bot does not need an ad blocker. It uses `yt-dlp` to fetch the clean audio stream directly from YouTube's media endpoints, so the audio it plays does not contain video ads. There is no in-stream ad to skip.
 
 ## Setup
 
@@ -26,11 +26,13 @@ This bot does not need an ad blocker. It uses [`play-dl`](https://github.com/pla
    ```bash
    cp .env.example .env
    ```
-   - `DISCORD_TOKEN` — your bot token.
-   - `ACCESS_ROLE_ID` — role allowed to use the bot.
-   - `PRIORITY_ROLE_ID` — role that gets exclusive control while playing.
+   - `DISCORD_TOKEN` - your bot token.
+   - `ACCESS_ROLE_ID` - role allowed to use the bot.
+   - `PRIORITY_ROLE_ID` - role that gets exclusive control while playing.
+   - `YT_PROXY` - optional, but recommended when a VPS/datacenter IP is blocked by YouTube. Use a residential proxy URL such as `http://user:pass@host:port` or `socks5://user:pass@host:port`.
+   - `YT_COOKIES_FILE` - optional cookies.txt path. Keep using it with `YT_PROXY` if YouTube still asks for sign-in.
 
-3. In the [Discord Developer Portal](https://discord.com/developers/applications) → your app → **Bot**:
+3. In the [Discord Developer Portal](https://discord.com/developers/applications) -> your app -> **Bot**:
    - Enable the **Server Members Intent** (required to check member roles).
    - Invite the bot with the `bot` and `applications.commands` scopes and the
      **Connect** + **Speak** + **Send Messages** permissions.
@@ -41,6 +43,21 @@ This bot does not need an ad blocker. It uses [`play-dl`](https://github.com/pla
    ```
    Slash commands register automatically in every server the bot is in.
 
+## YouTube Proxy Setup
+
+If YouTube has blocked your server IP, cookies by themselves usually will not fix it because requests are still coming from the flagged datacenter IP. Set `YT_PROXY` to a residential proxy and keep `YT_COOKIES_FILE` configured if the account/session is still needed:
+
+```bash
+YT_PROXY=http://user:pass@proxy-host:proxy-port
+YT_COOKIES_FILE=/var/scify/cookies.txt
+```
+
+SOCKS proxies are also supported by `yt-dlp`:
+
+```bash
+YT_PROXY=socks5://user:pass@proxy-host:proxy-port
+```
+
 ## How the priority lock works
 
 1. A member with the priority role runs `/play`. They become the **lock holder**.
@@ -49,12 +66,10 @@ This bot does not need an ad blocker. It uses [`play-dl`](https://github.com/pla
 
 ## Security note
 
-**Never share or commit your bot token.** If your token is ever exposed, reset it
-in the Developer Portal (Bot → Reset Token). The `.gitignore` keeps your `.env`
-out of version control.
+**Never share or commit your bot token.** If your token is ever exposed, reset it in the Developer Portal (Bot -> Reset Token). The `.gitignore` keeps your `.env` out of version control.
 
 ## Notes
 
 - Uses `opusscript` (pure JavaScript) for Opus encoding, so no C++ build tools are required.
-- `ffmpeg-static` provides the bundled FFmpeg binary, so you don't need a system FFmpeg install.
-- Seeking re-streams the track from the requested position using `play-dl`'s `seek` option.
+- `ffmpeg-static` provides the bundled FFmpeg binary, so you do not need a system FFmpeg install.
+- Seeking re-streams the track from the requested position by spawning `yt-dlp` and FFmpeg again.
