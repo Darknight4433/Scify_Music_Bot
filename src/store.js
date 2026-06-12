@@ -1,7 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DATA_DIR = path.resolve('data');
+// Anchor data directory to the project root regardless of working directory.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'library.json');
 
 const MAX_HISTORY = 25;
@@ -33,8 +36,12 @@ class Store {
 
   _save() {
     try {
-      if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-      writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2));
+      if (!existsSync(DATA_DIR)) {
+        mkdirSync(DATA_DIR, { recursive: true });
+        // Restrict directory permissions (owner-only) on Linux/macOS.
+        try { chmodSync(DATA_DIR, 0o700); } catch {}
+      }
+      writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), { mode: 0o600 });
     } catch (err) {
       console.error('Failed to save library store:', err.message);
     }

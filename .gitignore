@@ -2,3 +2,21 @@ node_modules/
 .env
 *.log
 data/
+
+# Cookies (contains YouTube auth — never commit)
+cookies.txt
+*.cookies
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+dist/

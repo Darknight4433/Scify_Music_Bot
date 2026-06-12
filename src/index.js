@@ -176,6 +176,14 @@ async function handleSlash(interaction) {
   if (interaction.commandName === 'play') {
     const query = interaction.options.getString('query', false);
 
+    // Validate the query: reject excessively long or suspicious input.
+    if (query && query.length > 500) {
+      return interaction.reply({
+        content: 'Query is too long. Keep it under 500 characters.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     // No query -> show the library (continue + recently played) privately.
     if (!query) {
       const session = store.getSession(interaction.guild.id);
@@ -431,4 +439,26 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   }
 });
 
-client.login(TOKEN);
+// ---------- Graceful shutdown ----------
+
+async function shutdown(signal) {
+  console.log(`\n${signal} received — shutting down gracefully…`);
+  // Persist sessions & kill streams for every guild.
+  for (const [, state] of music.states ?? []) {
+    try { state.persistSession(); } catch {}
+    try { state.destroy(); } catch {}
+  }
+  client.destroy();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
+});
+
+client.login(TOKEN).catch((err) => {
+  console.error('Failed to log in — is your DISCORD_TOKEN correct?', err.message);
+  process.exit(1);
+});
