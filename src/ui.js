@@ -53,7 +53,7 @@ export function buildPanelEmbed(state, { locked, lockHolderTag } = {}) {
 
   if (locked) {
     embed.setFooter({
-      text: `🔒 Locked by ${lockHolderTag ?? 'a priority user'} — only they can control playback.`,
+      text: `🎵 Controlled by ${lockHolderTag ?? 'someone'} — wait for their session to end.`,
     });
   }
 

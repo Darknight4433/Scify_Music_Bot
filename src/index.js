@@ -59,14 +59,16 @@ function canControl(state, member) {
   if (!hasAccess(member)) {
     return { allowed: false, reason: 'You do not have the role required to use this bot.' };
   }
-  // No state yet (e.g. clicking a panel after a bot restart) -> nothing locked.
-  if (!state || !state.lockHolderId) return { allowed: true };
-  // Locked by this same user -> allowed.
-  if (state.lockHolderId === member.id) return { allowed: true };
-  // Locked by someone else.
+  // No state yet -> nothing locked.
+  if (!state || !state.starterUser) return { allowed: true };
+  // Server owner can always control.
+  if (member.id === member.guild.ownerId) return { allowed: true };
+  // The person who started playback can control.
+  if (state.starterUser.id === member.id) return { allowed: true };
+  // Anyone else has to wait.
   return {
     allowed: false,
-    reason: '🔒 A priority user is currently controlling the music. You can play again once they stop or leave the voice channel.',
+    reason: `🎵 **${state.starterUser.username}** is currently in control. You can play once their session ends.`,
   };
 }
 
@@ -121,17 +123,14 @@ client.on(Events.GuildCreate, async (guild) => {
 // ---------- Panel rendering for a specific viewer ----------
 
 function renderPanelFor(state, viewer) {
-  const locked = Boolean(state?.lockHolderId);
-  const lockedOut = locked && state.lockHolderId !== viewer.id;
-  const lockHolderTag = locked
-    ? viewer.guild.members.cache.get(state.lockHolderId)?.user?.tag
-    : undefined;
+  const isController = !state?.starterUser || state.starterUser.id === viewer.id || viewer.id === viewer.guild.ownerId;
+  const controllerTag = state?.starterUser?.username;
 
   return {
-    embeds: [buildPanelEmbed(state, { locked, lockHolderTag })],
+    embeds: [buildPanelEmbed(state, { locked: !isController, lockHolderTag: controllerTag })],
     components: buildPanelComponents({
       paused: state ? state.isPaused() : false,
-      disabled: lockedOut || !state?.current,
+      disabled: !isController || !state?.current,
       loopMode: state?.loopMode ?? 'off',
     }),
   };
@@ -140,9 +139,8 @@ function renderPanelFor(state, viewer) {
 // ---------- Queue list view for a specific viewer ----------
 
 function renderQueueFor(state, viewer) {
-  const locked = Boolean(state?.lockHolderId);
-  const lockedOut = locked && state.lockHolderId !== viewer.id;
-  return buildQueueView(state, { disabled: lockedOut });
+  const isController = !state?.starterUser || state.starterUser.id === viewer.id || viewer.id === viewer.guild.ownerId;
+  return buildQueueView(state, { disabled: !isController });
 }
 
 // ---------- Interaction handling ----------
