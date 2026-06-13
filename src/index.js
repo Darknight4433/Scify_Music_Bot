@@ -8,6 +8,8 @@ import {
   REST,
   Routes,
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -269,9 +271,60 @@ async function handleButton(interaction) {
     return interaction.update(renderQueueFor(state, member));
   }
 
+  // --- Approve/Deny permission requests ---
+  if (action.startsWith('approve:') || action.startsWith('deny:')) {
+    const parts = action.split(':');
+    const decision = parts[0]; // 'approve' or 'deny'
+    const requestedAction = parts[1]; // 'skip' or 'stop'
+    const requesterId = parts[2];
+
+    // Only the controller can approve/deny.
+    if (!state?.starterUser || state.starterUser.id !== member.id) {
+      return interaction.reply({ content: 'Only the current controller can decide.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (decision === 'approve') {
+      if (requestedAction === 'skip') state.skip();
+      else if (requestedAction === 'stop') state.stop();
+      await interaction.update({
+        content: `✅ **${member.user.username}** approved the **${requestedAction}** request from <@${requesterId}>.`,
+        components: [],
+      });
+    } else {
+      await interaction.update({
+        content: `❌ **${member.user.username}** denied the **${requestedAction}** request from <@${requesterId}>.`,
+        components: [],
+      });
+    }
+    return;
+  }
+
   // All other actions modify playback -> check the lock.
   const control = canControl(state, member);
   if (!control.allowed) {
+    // Instead of just blocking, offer a "request skip" for skip/stop actions.
+    if (action === 'skip' || action === 'stop') {
+      const controllerUser = state.starterUser;
+      if (controllerUser) {
+        return interaction.reply({
+          content: `🎵 **${controllerUser.username}** is in control. Asking them for permission…\n<@${controllerUser.id}>, **${member.user.username}** wants to **${action}** the current track. React below to approve.`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`mc:approve:${action}:${member.id}`)
+                .setEmoji('✅')
+                .setLabel('Allow')
+                .setStyle(ButtonStyle.Success),
+              new ButtonBuilder()
+                .setCustomId(`mc:deny:${action}:${member.id}`)
+                .setEmoji('❌')
+                .setLabel('Deny')
+                .setStyle(ButtonStyle.Danger),
+            ),
+          ],
+        });
+      }
+    }
     return interaction.reply({ content: control.reason, flags: MessageFlags.Ephemeral });
   }
 
