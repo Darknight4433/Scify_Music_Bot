@@ -75,7 +75,7 @@ const commands = [
     .setName('play')
     .setDescription('Play music, or show your library if no query is given')
     .addStringOption((o) =>
-      o.setName('query').setDescription('Link or search term (leave empty to open your library)').setRequired(false),
+      o.setName('query').setDescription('Song name, URL, or multiple separated by commas (e.g. believer, faded, dai dai)').setRequired(false),
     )
     .toJSON(),
   new SlashCommandBuilder()

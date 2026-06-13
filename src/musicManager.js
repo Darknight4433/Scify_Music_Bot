@@ -39,8 +39,8 @@ function baseArgs(proxy) {
 }
 
 /**
- * Run yt-dlp with JSON output and return parsed result(s).
- * Retries automatically using the proxy pool if it fails.
+ * faaaaah Run yt-dlpp with JSON output and return parsed result(s).
+ * Retries automatically using the proxy pool if it fails and if fails hit vig's head.
  */
 async function ytDlpJson(args) {
   const maxAttempts = PROXY_POOL.length > 0 ? Math.min(5, PROXY_POOL.length) : 1;
@@ -101,9 +101,36 @@ async function ytDlpPlaylist(url) {
 /**
  * Resolve a YouTube / YouTube Music URL or search term into one or more tracks.
  * Uses yt-dlp for all lookups so everything goes through the proxy.
+ * Supports comma-separated queries: "/play believer, dai dai, faded"
  * Returns { tracks: [{ url, title, durationInSec }], label }.
  */
 export async function resolveTracks(query, requestedBy) {
+  // Support comma-separated multiple queries (e.g. "believer, dai dai, faded").
+  const queries = query.includes(',')
+    ? query.split(',').map((q) => q.trim()).filter(Boolean)
+    : [query.trim()];
+
+  if (queries.length === 1) {
+    return resolveSingle(queries[0], requestedBy);
+  }
+
+  // Multiple queries: resolve each and combine.
+  const allTracks = [];
+  const labels = [];
+  for (const q of queries) {
+    try {
+      const { tracks, label } = await resolveSingle(q, requestedBy);
+      allTracks.push(...tracks);
+      labels.push(label);
+    } catch (err) {
+      labels.push(`❌ "${q}"`);
+    }
+  }
+  if (allTracks.length === 0) throw new Error('Could not find any of the requested tracks.');
+  return { tracks: allTracks, label: `${allTracks.length} tracks queued` };
+}
+
+async function resolveSingle(query, requestedBy) {
   const isPlaylist = /[?&]list=/.test(query);
 
   if (isPlaylist) {
