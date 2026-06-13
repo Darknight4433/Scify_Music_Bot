@@ -15,7 +15,7 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { MusicManager, resolveTracks } from './musicManager.js';
-import { buildPanelEmbed, buildPanelComponents, buildQueueView, buildLibraryView, formatTime } from './ui.js';
+import { buildPanelEmbed, buildPanelComponents, buildQueueView, buildLibraryView, buildUserLibraryView, formatTime } from './ui.js';
 import { store } from './store.js';
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -95,6 +95,24 @@ const commands = [
   new SlashCommandBuilder()
     .setName('controls')
     .setDescription('Open your personal music control panel')
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('lib')
+    .setDescription('View your personal playlist and play it')
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('libadd')
+    .setDescription('Add songs to your personal library (comma-separated)')
+    .addStringOption((o) =>
+      o.setName('songs').setDescription('Song name, URL, or multiple separated by commas').setRequired(true),
+    )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('libremove')
+    .setDescription('Remove a song from your personal library by its number')
+    .addIntegerOption((o) =>
+      o.setName('number').setDescription('Song number in your library to remove').setRequired(true),
+    )
     .toJSON(),
 ];
 
@@ -186,6 +204,52 @@ async function handleSlash(interaction) {
     const history = store.getHistory(interaction.guild.id);
     return interaction.reply({
       ...buildLibraryView(session, history),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.commandName === 'lib') {
+    const userLib = store.getUserLibrary(interaction.guild.id, member.id);
+    return interaction.reply({
+      ...buildUserLibraryView(userLib, member.user.username),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.commandName === 'libadd') {
+    const songs = interaction.options.getString('songs', true);
+    if (songs.length > 500) {
+      return interaction.reply({
+        content: 'Query is too long. Keep it under 500 characters.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+      const { tracks, label } = await resolveTracks(songs, member.user.username);
+      store.addToUserLibrary(interaction.guild.id, member.id, tracks);
+      await interaction.editReply({
+        content: `✅ Added to your library: **${label}**\nYou now have **${store.getUserLibrary(interaction.guild.id, member.id).length}** song(s) in your library.`,
+      });
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ ${err.message}` });
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'libremove') {
+    const num = interaction.options.getInteger('number', true);
+    const removed = store.removeFromUserLibrary(interaction.guild.id, member.id, num - 1);
+    if (!removed) {
+      return interaction.reply({
+        content: `Invalid number. Use \`/lib\` to see your library.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    return interaction.reply({
+      content: `🗑️ Removed **${removed.title}** from your library.`,
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -343,7 +407,7 @@ async function handleButton(interaction) {
 
   // Library actions (continue / replay) start playback, so they need a voice
   // channel but NOT an already-playing track. Handle them before that guard.
-  if (action === 'continue' || action.startsWith('replay:')) {
+  if (action === 'continue' || action.startsWith('replay:') || action === 'playlib') {
     const voiceChannel = member.voice?.channel;
     if (!voiceChannel) {
       return interaction.reply({
@@ -367,6 +431,13 @@ async function handleButton(interaction) {
       if (action === 'continue') {
         const session = store.getSession(interaction.guild.id);
         await liveState.resumeSession(session);
+      } else if (action === 'playlib') {
+        // Play the user's entire personal library as a playlist.
+        const userLib = store.getUserLibrary(interaction.guild.id, member.id);
+        if (!userLib.length) throw new Error('Your library is empty. Add songs with `/libadd`.');
+        await liveState.waitUntilReady();
+        liveState.queue = userLib.map((t) => ({ ...t, requestedBy: member.user.username }));
+        await liveState.playNext();
       } else {
         const index = parseInt(action.slice(7), 10);
         const history = store.getHistory(interaction.guild.id);

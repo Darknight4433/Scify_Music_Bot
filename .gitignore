@@ -7,6 +7,10 @@ data/
 cookies.txt
 *.cookies
 
+# Windows launcher scripts
+*.bat
+*.vbs
+
 # OS junk
 .DS_Store
 Thumbs.db

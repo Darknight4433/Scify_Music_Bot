@@ -220,10 +220,45 @@ function truncate(text, len = 60) {
 }
 
 /**
- * Build the library view shown when `/play` is used with no query.
- * Shows a "Continue" button if there's a saved session, plus a numbered list
- * of recently played tracks with a replay button each (max 20).
+ * Build the per-user library view shown by `/lib`.
+ * Shows numbered songs and a "Play All" button.
  */
+export function buildUserLibraryView(userLib, username) {
+  const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`📚 ${username}'s Library`);
+
+  if (!userLib || userLib.length === 0) {
+    embed.setDescription('Your library is empty.\nAdd songs with `/libadd <song1>, <song2>, ...`');
+    return { embeds: [embed], components: [] };
+  }
+
+  const lines = [];
+  lines.push(`**${userLib.length} song(s)** in your library:\n`);
+  const max = Math.min(userLib.length, 25);
+  for (let i = 0; i < max; i++) {
+    const t = userLib[i];
+    const dur = t.durationInSec ? formatTime(t.durationInSec) : '??:??';
+    lines.push(`\`${i + 1}.\` ${truncate(t.title, 45)} • \`${dur}\``);
+  }
+  if (userLib.length > max) {
+    lines.push(`\n*…and ${userLib.length - max} more*`);
+  }
+  lines.push(`\nUse \`/libadd <songs>\` to add • \`/libremove <number>\` to remove`);
+
+  embed.setDescription(lines.join('\n'));
+
+  const rows = [];
+  rows.push(
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('mc:playlib')
+        .setEmoji('▶️')
+        .setLabel('Play All')
+        .setStyle(ButtonStyle.Success),
+    ),
+  );
+
+  return { embeds: [embed], components: rows };
+}
 export function buildLibraryView(session, history) {
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🎶 Your music library');
 

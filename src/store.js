@@ -8,6 +8,7 @@ const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'library.json');
 
 const MAX_HISTORY = 25;
+const MAX_USER_LIBRARY = 50;
 
 /**
  * Persistent per-guild store for:
@@ -90,6 +91,53 @@ class Store {
   clearSession(guildId) {
     this._guild(guildId).session = null;
     this._save();
+  }
+
+  // ---------- Per-user library ----------
+
+  _userLibraries(guildId) {
+    const g = this._guild(guildId);
+    if (!g.userLibraries) g.userLibraries = {};
+    return g.userLibraries;
+  }
+
+  _userLib(guildId, userId) {
+    const libs = this._userLibraries(guildId);
+    if (!libs[userId]) libs[userId] = [];
+    return libs[userId];
+  }
+
+  /**
+   * Add one or more tracks to a user's personal library. Dedupes by URL.
+   */
+  addToUserLibrary(guildId, userId, tracks) {
+    const lib = this._userLib(guildId, userId);
+    for (const track of tracks) {
+      if (!track?.url) continue;
+      // Remove if already exists (will re-add at end)
+      const idx = lib.findIndex((t) => t.url === track.url);
+      if (idx !== -1) lib.splice(idx, 1);
+      lib.push({ url: track.url, title: track.title, durationInSec: track.durationInSec ?? 0 });
+    }
+    // Cap it
+    if (lib.length > MAX_USER_LIBRARY) lib.splice(0, lib.length - MAX_USER_LIBRARY);
+    this._userLibraries(guildId)[userId] = lib;
+    this._save();
+  }
+
+  /**
+   * Remove a track from a user's library by index.
+   */
+  removeFromUserLibrary(guildId, userId, index) {
+    const lib = this._userLib(guildId, userId);
+    if (index < 0 || index >= lib.length) return null;
+    const [removed] = lib.splice(index, 1);
+    this._save();
+    return removed;
+  }
+
+  getUserLibrary(guildId, userId) {
+    return this._userLib(guildId, userId);
   }
 }
 
