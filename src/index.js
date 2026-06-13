@@ -40,6 +40,8 @@ const music = new MusicManager();
 // ---------- Permission helpers ----------
 
 function hasAccess(member) {
+  // Server owner always has access.
+  if (member.id === member.guild.ownerId) return true;
   if (!ACCESS_ROLE_ID) return true;
   return member.roles.cache.has(ACCESS_ROLE_ID);
 }
@@ -175,7 +177,22 @@ async function handleSlash(interaction) {
     });
   }
 
-  const state = music.get(interaction.guild.id);
+  if (interaction.commandName === 'library') {
+    const session = store.getSession(interaction.guild.id);
+    const history = store.getHistory(interaction.guild.id);
+    return interaction.reply({
+      ...buildLibraryView(session, history),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.commandName === 'controls') {
+    const state = music.peek(interaction.guild.id);
+    return interaction.reply({
+      ...renderPanelFor(state, member),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 
   if (interaction.commandName === 'play') {
     const query = interaction.options.getString('query', true);
@@ -196,6 +213,8 @@ async function handleSlash(interaction) {
       });
     }
 
+    const state = music.get(interaction.guild.id);
+
     // Enforce the priority lock before starting anything new.
     const control = canControl(state, member);
     if (!control.allowed) {
@@ -207,8 +226,6 @@ async function handleSlash(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     state.textChannel = interaction.channel;
-    // Remember who last started playback, so we can DM them (privately) when
-    // the queue finishes instead of posting a public message.
     state.starterUser = member.user;
     if (!state.connection || state.voiceChannelId !== voiceChannel.id) {
       state.connect(voiceChannel);
@@ -229,22 +246,6 @@ async function handleSlash(interaction) {
       ...renderPanelFor(state, member),
     });
     return;
-  }
-
-  if (interaction.commandName === 'controls') {
-    return interaction.reply({
-      ...renderPanelFor(state, member),
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  if (interaction.commandName === 'library') {
-    const session = store.getSession(interaction.guild.id);
-    const history = store.getHistory(interaction.guild.id);
-    return interaction.reply({
-      ...buildLibraryView(session, history),
-      flags: MessageFlags.Ephemeral,
-    });
   }
 }
 
@@ -424,20 +425,60 @@ async function handleModal(interaction) {
 }
 
 // ---------- Release the lock when the priority user leaves the VC ----------
+// ---------- Auto-leave when the VC is empty for 2 minutes ----------
+
+const leaveTimers = new Map(); // guildId -> timeout
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guildId = oldState.guild.id;
   const state = music.peek(guildId);
-  if (!state || !state.lockHolderId) return;
 
-  // Only care about the lock holder.
-  if (oldState.id !== state.lockHolderId) return;
+  // --- Priority lock release ---
+  if (state?.lockHolderId && oldState.id === state.lockHolderId) {
+    const left = oldState.channelId === state.voiceChannelId && newState.channelId !== state.voiceChannelId;
+    if (left) {
+      state.lockHolderId = null;
+      if (state.textChannel) {
+        state.textChannel.send('🔓 Priority user left — controls are open to everyone again.').catch(() => {});
+      }
+    }
+  }
 
-  const left = oldState.channelId === state.voiceChannelId && newState.channelId !== state.voiceChannelId;
-  if (left) {
-    state.lockHolderId = null;
-    if (state.textChannel) {
-      state.textChannel.send('🔓 Priority user left — controls are open to everyone again.').catch(() => {});
+  // --- Auto-leave if VC is empty (only the bot remains) ---
+  if (!state || !state.voiceChannelId) return;
+
+  const voiceChannel = oldState.guild.channels.cache.get(state.voiceChannelId);
+  if (!voiceChannel) return;
+
+  // Count human members (exclude bots)
+  const humans = voiceChannel.members.filter((m) => !m.user.bot).size;
+
+  if (humans === 0) {
+    // Start a 2-minute timer to leave
+    if (!leaveTimers.has(guildId)) {
+      const timer = setTimeout(() => {
+        leaveTimers.delete(guildId);
+        const currentState = music.peek(guildId);
+        if (!currentState) return;
+
+        // Re-check: still empty?
+        const vc = oldState.guild.channels.cache.get(currentState.voiceChannelId);
+        const stillEmpty = !vc || vc.members.filter((m) => !m.user.bot).size === 0;
+
+        if (stillEmpty) {
+          currentState.persistSession();
+          currentState.destroy();
+          music.states.delete(guildId);
+          console.log(`[${guildId}] Left VC — empty for 2 minutes.`);
+        }
+      }, 2 * 60 * 1000); // 2 minutes
+      leaveTimers.set(guildId, timer);
+    }
+  } else {
+    // Someone joined back — cancel the leave timer
+    if (leaveTimers.has(guildId)) {
+      clearTimeout(leaveTimers.get(guildId));
+      leaveTimers.delete(guildId);
     }
   }
 });
