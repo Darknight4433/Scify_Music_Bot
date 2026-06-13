@@ -310,6 +310,10 @@ class GuildMusicState {
         this.cleanupStream = null;
       }
       this.lockHolderId = null;
+      // Notify that the queue is empty.
+      if (this.textChannel) {
+        this.textChannel.send('📭 Queue finished — no more tracks to play.').catch(() => {});
+      }
       return;
     }
 
@@ -322,6 +326,12 @@ class GuildMusicState {
       await this.streamAndPlay(track, 0);
       this.failStreak = 0;
       this.persistSession();
+
+      // Public "Now Playing" notification so everyone in the server can see.
+      if (this.textChannel) {
+        const requester = track.requestedBy ?? 'unknown';
+        this.textChannel.send(`🎶 **Now playing:** ${track.title}\n*Requested by ${requester}*`).catch(() => {});
+      }
     } catch (err) {
       // Extraction failed (e.g. bot check, deleted/age-restricted video).
       this.failStreak = (this.failStreak ?? 0) + 1;

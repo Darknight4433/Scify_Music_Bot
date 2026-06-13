@@ -215,19 +215,20 @@ async function handleSlash(interaction) {
 
     const state = music.get(interaction.guild.id);
 
-    // Enforce the priority lock before starting anything new.
-    const control = canControl(state, member);
-    if (!control.allowed) {
-      return interaction.reply({ content: control.reason, flags: MessageFlags.Ephemeral });
-    }
+    // Anyone can add to the queue — but only the first person (or when nothing
+    // is playing) becomes the controller.
+    const isAlreadyPlaying = state.playing;
 
     // Acknowledge immediately so we never hit the 3s interaction deadline,
     // since resolving the track can take a moment.
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    state.textChannel = interaction.channel;
-    state.starterUser = member.user;
+    if (!isAlreadyPlaying) {
+      state.textChannel = interaction.channel;
+      state.starterUser = member.user;
+    }
     if (!state.connection || state.voiceChannelId !== voiceChannel.id) {
+      state.textChannel = interaction.channel;
       state.connect(voiceChannel);
     }
 
