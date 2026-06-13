@@ -73,10 +73,14 @@ function canControl(state, member) {
 const commands = [
   new SlashCommandBuilder()
     .setName('play')
-    .setDescription('Play music, or show your library if no query is given')
+    .setDescription('Play a song or queue multiple (comma-separated)')
     .addStringOption((o) =>
-      o.setName('query').setDescription('Song name, URL, or multiple separated by commas (e.g. believer, faded, dai dai)').setRequired(false),
+      o.setName('query').setDescription('Song name, URL, or multiple separated by commas').setRequired(true),
     )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('library')
+    .setDescription('Show your music library (resume or replay)')
     .toJSON(),
   new SlashCommandBuilder()
     .setName('controls')
@@ -174,22 +178,12 @@ async function handleSlash(interaction) {
   const state = music.get(interaction.guild.id);
 
   if (interaction.commandName === 'play') {
-    const query = interaction.options.getString('query', false);
+    const query = interaction.options.getString('query', true);
 
     // Validate the query: reject excessively long or suspicious input.
-    if (query && query.length > 500) {
+    if (query.length > 500) {
       return interaction.reply({
         content: 'Query is too long. Keep it under 500 characters.',
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    // No query -> show the library (continue + recently played) privately.
-    if (!query) {
-      const session = store.getSession(interaction.guild.id);
-      const history = store.getHistory(interaction.guild.id);
-      return interaction.reply({
-        ...buildLibraryView(session, history),
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -240,6 +234,15 @@ async function handleSlash(interaction) {
   if (interaction.commandName === 'controls') {
     return interaction.reply({
       ...renderPanelFor(state, member),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.commandName === 'library') {
+    const session = store.getSession(interaction.guild.id);
+    const history = store.getHistory(interaction.guild.id);
+    return interaction.reply({
+      ...buildLibraryView(session, history),
       flags: MessageFlags.Ephemeral,
     });
   }
