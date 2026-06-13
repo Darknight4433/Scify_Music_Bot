@@ -36,9 +36,6 @@ function authArgs(proxy) {
   } else if (COOKIES_FROM_BROWSER) {
     args.push('--cookies-from-browser', COOKIES_FROM_BROWSER);
   }
-  // Prefer player clients that are less likely to trigger the bot check.
-  // Using both ios and android/safari clients helps with compatibility.
-  args.push('--extractor-args', 'youtube:player_client=ios,android,web_safari');
   return args;
 }
 

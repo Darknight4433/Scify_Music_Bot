@@ -34,7 +34,8 @@ function baseArgs(proxy) {
   const args = [];
   if (proxy) args.push('--proxy', proxy);
   if (COOKIES_FILE && existsSync(COOKIES_FILE)) args.push('--cookies', COOKIES_FILE);
-  args.push('--extractor-args', 'youtube:player_client=ios,android,web_safari');
+  // Let yt-dlp use the default player client — restricting to ios/android
+  // causes "Requested format is not available" on some videos.
   return args;
 }
 
