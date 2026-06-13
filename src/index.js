@@ -85,6 +85,10 @@ const commands = [
     )
     .toJSON(),
   new SlashCommandBuilder()
+    .setName('queue')
+    .setDescription('See what\'s playing and what\'s coming up next')
+    .toJSON(),
+  new SlashCommandBuilder()
     .setName('library')
     .setDescription('Show your music library (resume or replay)')
     .toJSON(),
@@ -190,6 +194,14 @@ async function handleSlash(interaction) {
     const state = music.peek(interaction.guild.id);
     return interaction.reply({
       ...renderPanelFor(state, member),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.commandName === 'queue') {
+    const state = music.peek(interaction.guild.id);
+    return interaction.reply({
+      ...renderQueueFor(state, member),
       flags: MessageFlags.Ephemeral,
     });
   }

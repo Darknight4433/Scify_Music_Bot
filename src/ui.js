@@ -131,43 +131,74 @@ export function buildPanelComponents({ paused = false, disabled = false, loopMod
 }
 
 /**
- * Build the "all songs" view: an embed listing the queue plus a button per
- * track (max 20) so the viewer can jump straight to one. Includes a button
- * to go back to the control panel.
+ * Build the queue view with a clean, easy-to-read layout.
+ * Shows: now playing (with progress), up next list with requester names and durations.
  */
 export function buildQueueView(state, { disabled = false } = {}) {
-  const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🎵 Songs in queue');
+  const embed = new EmbedBuilder().setColor(0x5865f2);
 
   if (!state || (!state.current && state.queue.length === 0)) {
-    embed.setDescription('The queue is empty. Use `/play` to add something.');
+    embed.setTitle('📭 Queue is empty');
+    embed.setDescription('Use `/play <song>` to add tracks.');
     return { embeds: [embed], components: [backRow()] };
   }
 
+  embed.setTitle('🎵 Music Queue');
+
   const lines = [];
+
+  // Now playing section
   if (state.current) {
-    lines.push(`**Now playing:** ${truncate(state.current.title)}`);
+    const pos = formatTime(state.getPosition());
+    const dur = formatTime(state.getDuration());
+    const paused = state.isPaused() ? ' ⏸️' : ' ▶️';
+    lines.push(`**Now Playing${paused}**`);
+    lines.push(`╔ ${truncate(state.current.title, 50)}`);
+    lines.push(`╚ \`${pos} / ${dur}\` • by **${state.current.requestedBy ?? 'unknown'}**`);
+    lines.push('');
   }
 
-  const max = Math.min(state.queue.length, 20);
-  for (let i = 0; i < max; i++) {
-    lines.push(`**${i + 1}.** ${truncate(state.queue[i].title)}`);
-  }
-  if (state.queue.length > max) {
-    lines.push(`…and ${state.queue.length - max} more`);
-  }
-  embed.setDescription(lines.join('\n') || 'Nothing queued.');
+  // Up next section
+  if (state.queue.length > 0) {
+    const max = Math.min(state.queue.length, 10);
+    let totalDuration = 0;
 
-  // Up to 20 jump buttons across 4 rows of 5.
+    lines.push(`**Up Next** (${state.queue.length} track${state.queue.length > 1 ? 's' : ''})`);
+    lines.push('───────────────────');
+
+    for (let i = 0; i < max; i++) {
+      const t = state.queue[i];
+      const dur = t.durationInSec ? formatTime(t.durationInSec) : '??:??';
+      totalDuration += t.durationInSec ?? 0;
+      lines.push(`\`${i + 1}.\` ${truncate(t.title, 40)} • \`${dur}\` • *${t.requestedBy ?? '?'}*`);
+    }
+
+    if (state.queue.length > max) {
+      lines.push(`\n*…and ${state.queue.length - max} more tracks*`);
+    }
+
+    lines.push('───────────────────');
+    lines.push(`⏱️ Total queue time: \`${formatTime(totalDuration)}\``);
+  } else {
+    lines.push('**Up Next:** Nothing — add more with `/play`');
+  }
+
+  embed.setDescription(lines.join('\n'));
+
+  // Jump buttons (max 10 shown, 2 rows of 5)
   const rows = [];
-  for (let i = 0; i < max; i++) {
-    if (i % 5 === 0) rows.push(new ActionRowBuilder());
-    rows[rows.length - 1].addComponents(
-      new ButtonBuilder()
-        .setCustomId(`mc:jump:${i}`)
-        .setLabel(String(i + 1))
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(disabled),
-    );
+  const max = Math.min(state.queue.length, 10);
+  if (max > 0) {
+    for (let i = 0; i < max; i++) {
+      if (i % 5 === 0) rows.push(new ActionRowBuilder());
+      rows[rows.length - 1].addComponents(
+        new ButtonBuilder()
+          .setCustomId(`mc:jump:${i}`)
+          .setLabel(`▶ ${i + 1}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(disabled),
+      );
+    }
   }
   rows.push(backRow());
   return { embeds: [embed], components: rows };
