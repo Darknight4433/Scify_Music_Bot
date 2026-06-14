@@ -139,6 +139,23 @@ class Store {
   getUserLibrary(guildId, userId) {
     return this._userLib(guildId, userId);
   }
+
+  // ---------- Temporary Spotify import storage (in-memory, not persisted) ----------
+
+  saveSpotifyImport(guildId, userId, data) {
+    if (!this._spotifyImports) this._spotifyImports = {};
+    this._spotifyImports[`${guildId}:${userId}`] = data;
+  }
+
+  getSpotifyImport(guildId, userId) {
+    if (!this._spotifyImports) return null;
+    return this._spotifyImports[`${guildId}:${userId}`] || null;
+  }
+
+  clearSpotifyImport(guildId, userId) {
+    if (!this._spotifyImports) return;
+    delete this._spotifyImports[`${guildId}:${userId}`];
+  }
 }
 
 export const store = new Store();

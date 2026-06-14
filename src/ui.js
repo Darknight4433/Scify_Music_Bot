@@ -220,6 +220,45 @@ function truncate(text, len = 60) {
 }
 
 /**
+ * Build the Spotify import confirmation view.
+ * Shows playlist name, track count, and preview of songs with confirm/cancel buttons.
+ */
+export function buildSpotifyImportView(playlistName, tracks) {
+  const embed = new EmbedBuilder().setColor(0x1DB954).setTitle(`🎵 Import from Spotify`);
+
+  const lines = [];
+  lines.push(`**${playlistName}** — ${tracks.length} track(s)\n`);
+
+  const max = Math.min(tracks.length, 15);
+  for (let i = 0; i < max; i++) {
+    const t = tracks[i];
+    const dur = t.durationInSec ? formatTime(t.durationInSec) : '??:??';
+    lines.push(`\`${i + 1}.\` ${truncate(t.title, 45)} • \`${dur}\``);
+  }
+  if (tracks.length > max) {
+    lines.push(`\n*…and ${tracks.length - max} more tracks*`);
+  }
+  lines.push(`\nThis will search YouTube for each track and add them to your library.`);
+
+  embed.setDescription(lines.join('\n'));
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('mc:spotifyconfirm')
+      .setEmoji('✅')
+      .setLabel(`Import ${tracks.length} tracks`)
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('mc:spotifycancel')
+      .setEmoji('❌')
+      .setLabel('Cancel')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+/**
  * Build the per-user library view shown by `/lib`.
  * Shows numbered songs and a "Play All" button.
  */

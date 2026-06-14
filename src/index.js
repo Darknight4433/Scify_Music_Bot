@@ -15,7 +15,8 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { MusicManager, resolveTracks } from './musicManager.js';
-import { buildPanelEmbed, buildPanelComponents, buildQueueView, buildLibraryView, buildUserLibraryView, formatTime } from './ui.js';
+import { fetchSpotifyPlaylist } from './spotify.js';
+import { buildPanelEmbed, buildPanelComponents, buildQueueView, buildLibraryView, buildUserLibraryView, buildSpotifyImportView, formatTime } from './ui.js';
 import { store } from './store.js';
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -112,6 +113,13 @@ const commands = [
     .setDescription('Remove a song from your personal library by its number')
     .addIntegerOption((o) =>
       o.setName('number').setDescription('Song number in your library to remove').setRequired(true),
+    )
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('libimport')
+    .setDescription('Import a Spotify playlist into your personal library')
+    .addStringOption((o) =>
+      o.setName('url').setDescription('Spotify playlist URL').setRequired(true),
     )
     .toJSON(),
 ];
@@ -254,6 +262,34 @@ async function handleSlash(interaction) {
     });
   }
 
+  if (interaction.commandName === 'libimport') {
+    const url = interaction.options.getString('url', true);
+
+    if (!url.includes('spotify.com/playlist') && !url.includes('spotify:playlist:')) {
+      return interaction.reply({
+        content: 'That doesn\'t look like a Spotify playlist URL. Use a link like `https://open.spotify.com/playlist/...`',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+      const { name, tracks } = await fetchSpotifyPlaylist(url);
+
+      // Store the fetched Spotify tracks temporarily so the user can pick/confirm.
+      // We'll resolve them to YouTube when they confirm or play.
+      store.saveSpotifyImport(interaction.guild.id, member.id, { name, tracks });
+
+      await interaction.editReply({
+        ...buildSpotifyImportView(name, tracks),
+      });
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ ${err.message}` });
+    }
+    return;
+  }
+
   if (interaction.commandName === 'controls') {
     const state = music.peek(interaction.guild.id);
     return interaction.reply({
@@ -373,6 +409,62 @@ async function handleButton(interaction) {
         components: [],
       });
     }
+    return;
+  }
+
+  // --- Spotify import actions (no playback control needed) ---
+  if (action === 'spotifyconfirm' || action === 'spotifycancel') {
+    if (action === 'spotifycancel') {
+      store.clearSpotifyImport(interaction.guild.id, member.id);
+      return interaction.update({ content: '❌ Import cancelled.', embeds: [], components: [] });
+    }
+
+    // Confirm: resolve each Spotify track to YouTube and add to user library.
+    const importData = store.getSpotifyImport(interaction.guild.id, member.id);
+    if (!importData || !importData.tracks.length) {
+      return interaction.update({ content: '⚠️ No import data found. Try `/libimport` again.', embeds: [], components: [] });
+    }
+
+    await interaction.update({
+      content: `⏳ Importing **${importData.tracks.length}** tracks from **${importData.name}**… This may take a moment.`,
+      embeds: [],
+      components: [],
+    });
+
+    const resolved = [];
+    const failed = [];
+
+    for (const t of importData.tracks) {
+      try {
+        const { tracks } = await resolveTracks(t.searchQuery, member.user.username);
+        if (tracks.length > 0) {
+          resolved.push({
+            url: tracks[0].url,
+            title: t.title,
+            durationInSec: t.durationInSec || tracks[0].durationInSec || 0,
+          });
+        } else {
+          failed.push(t.title);
+        }
+      } catch {
+        failed.push(t.title);
+      }
+    }
+
+    if (resolved.length > 0) {
+      store.addToUserLibrary(interaction.guild.id, member.id, resolved);
+    }
+    store.clearSpotifyImport(interaction.guild.id, member.id);
+
+    let msg = `✅ Imported **${resolved.length}/${importData.tracks.length}** tracks into your library.`;
+    if (failed.length > 0) {
+      const showFailed = failed.slice(0, 5).map((f) => `• ${f}`).join('\n');
+      msg += `\n\n❌ Couldn't find (${failed.length}):\n${showFailed}`;
+      if (failed.length > 5) msg += `\n…and ${failed.length - 5} more`;
+    }
+    msg += `\n\nUse \`/lib\` to see your library.`;
+
+    await interaction.editReply({ content: msg });
     return;
   }
 
