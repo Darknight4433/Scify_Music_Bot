@@ -8,7 +8,7 @@ const DATA_DIR = path.resolve(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'library.json');
 
 const MAX_HISTORY = 25;
-const MAX_USER_LIBRARY = 50;
+const MAX_USER_LIBRARY = 300;
 
 /**
  * Persistent per-guild store for:
