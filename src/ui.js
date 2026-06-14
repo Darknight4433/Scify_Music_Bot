@@ -266,7 +266,7 @@ export function buildUserLibraryView(userLib, username) {
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(`📚 ${username}'s Library`);
 
   if (!userLib || userLib.length === 0) {
-    embed.setDescription('Your library is empty.\nAdd songs with `/libadd <song1>, <song2>, ...`');
+    embed.setDescription('Your library is empty.\nAdd songs with `/library add <song1>, <song2>, ...`\nOr import from Spotify with `/library import <url>`');
     return { embeds: [embed], components: [] };
   }
 
@@ -281,7 +281,7 @@ export function buildUserLibraryView(userLib, username) {
   if (userLib.length > max) {
     lines.push(`\n*…and ${userLib.length - max} more*`);
   }
-  lines.push(`\nUse \`/libadd <songs>\` to add • \`/libremove <number>\` to remove`);
+  lines.push(`\n\`/library add <songs>\` to add • \`/library remove <number>\` to remove\n\`/library import <spotify-url>\` to import from Spotify`);
 
   embed.setDescription(lines.join('\n'));
 

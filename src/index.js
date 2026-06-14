@@ -90,36 +90,36 @@ const commands = [
     .setDescription('See what\'s playing and what\'s coming up next')
     .toJSON(),
   new SlashCommandBuilder()
-    .setName('library')
-    .setDescription('Show your music library (resume or replay)')
+    .setName('history')
+    .setDescription('Recently played songs & resume where you stopped')
     .toJSON(),
   new SlashCommandBuilder()
     .setName('controls')
     .setDescription('Open your personal music control panel')
     .toJSON(),
   new SlashCommandBuilder()
-    .setName('lib')
-    .setDescription('View your personal playlist and play it')
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName('libadd')
-    .setDescription('Add songs to your personal library (comma-separated)')
-    .addStringOption((o) =>
-      o.setName('songs').setDescription('Song name, URL, or multiple separated by commas').setRequired(true),
+    .setName('library')
+    .setDescription('Your personal music library')
+    .addSubcommand((sub) =>
+      sub.setName('view').setDescription('View your library and play it'),
     )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName('libremove')
-    .setDescription('Remove a song from your personal library by its number')
-    .addIntegerOption((o) =>
-      o.setName('number').setDescription('Song number in your library to remove').setRequired(true),
+    .addSubcommand((sub) =>
+      sub.setName('add').setDescription('Add songs to your library (comma-separated)')
+        .addStringOption((o) =>
+          o.setName('songs').setDescription('Song name, URL, or multiple separated by commas').setRequired(true),
+        ),
     )
-    .toJSON(),
-  new SlashCommandBuilder()
-    .setName('libimport')
-    .setDescription('Import a Spotify playlist into your personal library')
-    .addStringOption((o) =>
-      o.setName('url').setDescription('Spotify playlist URL').setRequired(true),
+    .addSubcommand((sub) =>
+      sub.setName('remove').setDescription('Remove a song by its number')
+        .addIntegerOption((o) =>
+          o.setName('number').setDescription('Song number to remove').setRequired(true),
+        ),
+    )
+    .addSubcommand((sub) =>
+      sub.setName('import').setDescription('Import a Spotify playlist')
+        .addStringOption((o) =>
+          o.setName('url').setDescription('Spotify playlist URL').setRequired(true),
+        ),
     )
     .toJSON(),
 ];
@@ -207,7 +207,7 @@ async function handleSlash(interaction) {
     });
   }
 
-  if (interaction.commandName === 'library') {
+  if (interaction.commandName === 'history') {
     const session = store.getSession(interaction.guild.id);
     const history = store.getHistory(interaction.guild.id);
     return interaction.reply({
@@ -216,78 +216,78 @@ async function handleSlash(interaction) {
     });
   }
 
-  if (interaction.commandName === 'lib') {
-    const userLib = store.getUserLibrary(interaction.guild.id, member.id);
-    return interaction.reply({
-      ...buildUserLibraryView(userLib, member.user.username),
-      flags: MessageFlags.Ephemeral,
-    });
-  }
+  if (interaction.commandName === 'library') {
+    const sub = interaction.options.getSubcommand();
 
-  if (interaction.commandName === 'libadd') {
-    const songs = interaction.options.getString('songs', true);
-    if (songs.length > 500) {
+    if (sub === 'view') {
+      const userLib = store.getUserLibrary(interaction.guild.id, member.id);
       return interaction.reply({
-        content: 'Query is too long. Keep it under 500 characters.',
+        ...buildUserLibraryView(userLib, member.user.username),
         flags: MessageFlags.Ephemeral,
       });
     }
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (sub === 'add') {
+      const songs = interaction.options.getString('songs', true);
+      if (songs.length > 500) {
+        return interaction.reply({
+          content: 'Query is too long. Keep it under 500 characters.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
 
-    try {
-      const { tracks, label } = await resolveTracks(songs, member.user.username);
-      store.addToUserLibrary(interaction.guild.id, member.id, tracks);
-      await interaction.editReply({
-        content: `✅ Added to your library: **${label}**\nYou now have **${store.getUserLibrary(interaction.guild.id, member.id).length}** song(s) in your library.`,
-      });
-    } catch (err) {
-      await interaction.editReply({ content: `⚠️ ${err.message}` });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      try {
+        const { tracks, label } = await resolveTracks(songs, member.user.username);
+        store.addToUserLibrary(interaction.guild.id, member.id, tracks);
+        await interaction.editReply({
+          content: `✅ Added to your library: **${label}**\nYou now have **${store.getUserLibrary(interaction.guild.id, member.id).length}** song(s) in your library.`,
+        });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
+      return;
     }
-    return;
-  }
 
-  if (interaction.commandName === 'libremove') {
-    const num = interaction.options.getInteger('number', true);
-    const removed = store.removeFromUserLibrary(interaction.guild.id, member.id, num - 1);
-    if (!removed) {
+    if (sub === 'remove') {
+      const num = interaction.options.getInteger('number', true);
+      const removed = store.removeFromUserLibrary(interaction.guild.id, member.id, num - 1);
+      if (!removed) {
+        return interaction.reply({
+          content: `Invalid number. Use \`/library view\` to see your library.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       return interaction.reply({
-        content: `Invalid number. Use \`/lib\` to see your library.`,
+        content: `🗑️ Removed **${removed.title}** from your library.`,
         flags: MessageFlags.Ephemeral,
       });
     }
-    return interaction.reply({
-      content: `🗑️ Removed **${removed.title}** from your library.`,
-      flags: MessageFlags.Ephemeral,
-    });
-  }
 
-  if (interaction.commandName === 'libimport') {
-    const url = interaction.options.getString('url', true);
+    if (sub === 'import') {
+      const url = interaction.options.getString('url', true);
 
-    if (!url.includes('spotify.com/playlist') && !url.includes('spotify:playlist:')) {
-      return interaction.reply({
-        content: 'That doesn\'t look like a Spotify playlist URL. Use a link like `https://open.spotify.com/playlist/...`',
-        flags: MessageFlags.Ephemeral,
-      });
+      if (!url.includes('spotify.com/playlist') && !url.includes('spotify:playlist:')) {
+        return interaction.reply({
+          content: 'That doesn\'t look like a Spotify playlist URL. Use a link like `https://open.spotify.com/playlist/...`',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      try {
+        const { name, tracks } = await fetchSpotifyPlaylist(url);
+        store.saveSpotifyImport(interaction.guild.id, member.id, { name, tracks });
+        await interaction.editReply({
+          ...buildSpotifyImportView(name, tracks),
+        });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
+      return;
     }
-
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    try {
-      const { name, tracks } = await fetchSpotifyPlaylist(url);
-
-      // Store the fetched Spotify tracks temporarily so the user can pick/confirm.
-      // We'll resolve them to YouTube when they confirm or play.
-      store.saveSpotifyImport(interaction.guild.id, member.id, { name, tracks });
-
-      await interaction.editReply({
-        ...buildSpotifyImportView(name, tracks),
-      });
-    } catch (err) {
-      await interaction.editReply({ content: `⚠️ ${err.message}` });
-    }
-    return;
   }
 
   if (interaction.commandName === 'controls') {
@@ -526,7 +526,7 @@ async function handleButton(interaction) {
       } else if (action === 'playlib') {
         // Play the user's entire personal library as a playlist.
         const userLib = store.getUserLibrary(interaction.guild.id, member.id);
-        if (!userLib.length) throw new Error('Your library is empty. Add songs with `/libadd`.');
+        if (!userLib.length) throw new Error('Your library is empty. Add songs with `/library add`.');
         await liveState.waitUntilReady();
         liveState.queue = userLib.map((t) => ({ ...t, requestedBy: member.user.username }));
         await liveState.playNext();
