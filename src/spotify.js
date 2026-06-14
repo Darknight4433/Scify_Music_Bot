@@ -26,7 +26,8 @@ async function getToken() {
   });
 
   if (!res.ok) {
-    throw new Error(`Spotify auth failed: ${res.status} ${res.statusText}`);
+    const body = await res.text().catch(() => '');
+    throw new Error(`Spotify auth failed: ${res.status} ${res.statusText} — ${body}`);
   }
 
   const data = await res.json();
@@ -75,7 +76,10 @@ export async function fetchSpotifyPlaylist(url) {
     });
 
     if (res.status === 404) throw new Error('Playlist not found. Make sure it\'s public.');
-    if (!res.ok) throw new Error(`Spotify API error: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Spotify API error: ${res.status} — ${body}`);
+    }
 
     const data = await res.json();
 
