@@ -7,16 +7,22 @@ import ffmpegPath from 'ffmpeg-static';
 
 const require = createRequire(import.meta.url);
 
-function resolveYtDlpPath() {
-  const pkgJson = require.resolve('youtube-dl-exec/package.json');
-  const pkgDir = path.dirname(pkgJson);
-  const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
-  return path.join(pkgDir, 'bin', binName);
+// Resolve yt-dlp: prefer bundled binary from youtube-dl-exec, fall back to system PATH.
+function resolveYtDlp() {
+  if (process.env.YT_DLP_PATH) return process.env.YT_DLP_PATH;
+  try {
+    const pkgJson = require.resolve('youtube-dl-exec/package.json');
+    const pkgDir = path.dirname(pkgJson);
+    const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+    const bundled = path.join(pkgDir, 'bin', binName);
+    if (existsSync(bundled)) return bundled;
+  } catch { /* package not installed */ }
+  return 'yt-dlp'; // system PATH
 }
 
-const YT_DLP = resolveYtDlpPath();
+const YT_DLP = resolveYtDlp();
 
-import { getNextProxy, PROXY_POOL } from './proxy.js';
+import { getNextProxy, reportSuccess, reportFailure, PROXY_POOL } from './proxy.js';
 
 const COOKIES_FILE = process.env.YT_COOKIES_FILE;
 const COOKIES_FROM_BROWSER = process.env.YT_COOKIES_FROM_BROWSER;
@@ -182,10 +188,12 @@ export async function createOpusStream(videoUrl, seekSeconds = 0) {
         ytdlp.once('close', onClose);
       });
 
+      reportSuccess(proxy);
       return { stream: ffmpeg.stdout, cleanup };
 
     } catch (err) {
       console.warn(`[Stream] Attempt ${attempt} failed with proxy ${proxy || 'Direct/None'}: ${err.message}`);
+      reportFailure(proxy);
       lastError = err;
       cleanup();
 

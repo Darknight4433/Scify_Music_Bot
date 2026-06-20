@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scify Music</title>
+  <meta name="description" content="Scify Music — Discord music bot desktop controller" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Custom title bar -->
+  <div class="titlebar" id="titlebar">
+    <div class="titlebar-drag">
+      <img src="../assets/logo.svg" class="titlebar-logo" alt="Scify" onerror="this.style.display='none'" />
+      <span class="titlebar-title">Scify Music</span>
+    </div>
+    <div class="titlebar-controls">
+      <button class="tbtn" id="btn-minimize" title="Minimize">&#8211;</button>
+      <button class="tbtn" id="btn-maximize" title="Maximize">&#9633;</button>
+      <button class="tbtn tbtn-close" id="btn-close" title="Close">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- First-run setup overlay -->
+  <div class="setup-overlay" id="setup-overlay" style="display:none;">
+    <div class="setup-card">
+      <div class="setup-header">
+        <div style="font-size: 48px; margin-bottom: 12px;">🎵</div>
+        <h1 style="font-size: 24px; font-weight: 700; margin: 0;">Welcome to Scify Music</h1>
+        <p style="color: var(--text-secondary); margin-top: 8px; font-size: 14px;">Ad-free music in your Discord voice channel. One click to get started.</p>
+      </div>
+
+      <div class="setup-step" id="setup-step-invite">
+        <div class="setup-step-header">
+          <span class="setup-step-num">1</span>
+          <span>Add the bot to your Discord server</span>
+        </div>
+        <p class="setup-hint">Click below to open Discord. Pick your server and authorize Scify Music. Then come back here.</p>
+        <button class="primary-btn" id="btn-setup-invite" style="width:100%; margin: 12px 0; font-size: 15px; padding: 14px;">🔗 Connect to Discord</button>
+        <button class="ghost-btn" id="btn-setup-done" style="width:100%; margin-top: 8px;">✅ Done — I've added the bot</button>
+        <div class="setup-error" id="setup-error" style="color:#f87171; font-size:12px; margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="layout">
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">🎵</div>
+        <div class="brand-text">
+          <div class="brand-name">Scify Music</div>
+          <div class="brand-sub">Discord Bot Controller</div>
+          <div class="bot-status-badge" id="bot-status-badge">
+            <span class="bot-status-dot" id="bot-status-dot"></span>
+            <span id="bot-status-text">Stopped</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">MENU</div>
+        <a class="nav-item active" data-view="now-playing" id="nav-now-playing">
+          <span class="nav-icon">🎧</span> Now Playing
+        </a>
+        <a class="nav-item" data-view="search" id="nav-search">
+          <span class="nav-icon">🔍</span> Search
+        </a>
+        <a class="nav-item" data-view="queue" id="nav-queue">
+          <span class="nav-icon">📋</span> Queue
+          <span class="queue-badge" id="queue-count" style="display:none"></span>
+        </a>
+        <a class="nav-item" data-view="library" id="nav-library">
+          <span class="nav-icon">📚</span> Library
+        </a>
+        <a class="nav-item" data-view="spotify" id="nav-spotify">
+          <span class="nav-icon">💚</span> Spotify Sync
+        </a>
+      </div>
+
+      <div class="nav-section" style="margin-top:auto">
+        <a class="nav-item" data-view="settings" id="nav-settings">
+          <span class="nav-icon">⚙️</span> Settings
+        </a>
+      </div>
+
+      <!-- Connection status -->
+      <div class="status-pill" id="connection-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Connecting…</span>
+      </div>
+    </nav>
+
+    <!-- Content area -->
+    <main class="content" id="content">
+
+      <!-- ── NOW PLAYING ── -->
+      <section class="view active" id="view-now-playing">
+        <div class="now-playing-layout">
+          <!-- Album art & track info -->
+          <div class="art-section">
+            <div class="art-frame" id="art-frame">
+              <img class="art-img" id="art-img" src="" alt="Album Art" />
+              <div class="art-placeholder" id="art-placeholder">🎵</div>
+            </div>
+            <div class="track-info">
+              <div class="track-title" id="track-title">Nothing playing</div>
+              <div class="track-sub" id="track-sub">Start a song from Search or Library</div>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="controls-section">
+            <!-- Progress bar -->
+            <div class="progress-area">
+              <span class="time-label" id="time-current">0:00</span>
+              <div class="progress-bar-wrap" id="progress-wrap">
+                <div class="progress-bar" id="progress-bar">
+                  <div class="progress-fill" id="progress-fill"></div>
+                  <div class="progress-thumb" id="progress-thumb"></div>
+                </div>
+              </div>
+              <span class="time-label" id="time-total">0:00</span>
+            </div>
+
+            <!-- Playback buttons -->
+            <div class="playback-buttons">
+              <button class="ctrl-btn loop-btn" id="btn-loop" title="Loop">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+              </button>
+              <button class="ctrl-btn" id="btn-back" title="Back 15s">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/><text x="8" y="15" font-size="6" fill="currentColor">15</text></svg>
+              </button>
+              <button class="ctrl-btn play-btn" id="btn-playpause" title="Play/Pause">
+                <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              </button>
+              <button class="ctrl-btn" id="btn-forward" title="Forward 15s">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 13c0 3.31-2.69 6-6 6s-6-2.69-6-6 2.69-6 6-6v4l5-5-5-5v3c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8h-2z"/><text x="8" y="15" font-size="6" fill="currentColor">15</text></svg>
+              </button>
+              <button class="ctrl-btn" id="btn-skip" title="Skip track">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
+              </button>
+            </div>
+
+            <!-- Stop & Queue quick add -->
+            <div class="secondary-controls">
+              <button class="ghost-btn" id="btn-stop">⏹ Stop</button>
+              <button class="ghost-btn" id="btn-go-queue">📋 See Queue</button>
+            </div>
+          </div>
+
+          <!-- Queue preview (right side) -->
+          <div class="queue-preview">
+            <div class="queue-preview-header">Up Next</div>
+            <div class="queue-preview-list" id="queue-preview-list">
+              <div class="empty-state-small">Queue is empty</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SEARCH ── -->
+      <section class="view" id="view-search">
+        <div class="view-header">
+          <h1 class="view-title">Search</h1>
+          <p class="view-subtitle">Search YouTube or paste a link to queue a song</p>
+        </div>
+
+        <div class="search-box-wrap">
+          <span class="search-icon">🔍</span>
+          <input
+            type="text"
+            class="search-input"
+            id="search-input"
+            placeholder="Search for a song, artist, or paste a YouTube link…"
+            autocomplete="off"
+          />
+          <button class="search-clear" id="search-clear" style="display:none">✕</button>
+        </div>
+
+        <div id="search-results" class="results-grid"></div>
+      </section>
+
+      <!-- ── QUEUE ── -->
+      <section class="view" id="view-queue">
+        <div class="view-header">
+          <h1 class="view-title">Queue</h1>
+          <div class="view-actions">
+            <button class="ghost-btn" id="btn-clear-queue">🗑 Clear All</button>
+          </div>
+        </div>
+        <div id="queue-list" class="track-list"></div>
+      </section>
+
+      <!-- ── LIBRARY ── -->
+      <section class="view" id="view-library">
+        <div class="view-header">
+          <h1 class="view-title">Recently Played</h1>
+          <p class="view-subtitle">Your last 25 tracks played through the bot</p>
+        </div>
+        <div id="library-list" class="results-grid"></div>
+      </section>
+
+      <!-- ── SPOTIFY SYNC ── -->
+      <section class="view" id="view-spotify">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Spotify Sync</h1>
+            <p class="view-subtitle">Scrape and sync public Spotify playlists. No account or API keys required!</p>
+          </div>
+          <div class="view-actions">
+            <button class="ghost-btn" id="btn-sync-all-spotify" style="display:none">🔄 Sync All Playlists</button>
+          </div>
+        </div>
+
+        <div class="spotify-sync-container">
+          <!-- Add Playlist Box -->
+          <div class="spotify-add-box-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 24px; max-width: 620px;">
+            <h3 class="settings-section" style="margin-bottom: 12px; font-size: 14px;">🔗 Import Playlist</h3>
+            <div class="field-row" style="display: flex; gap: 8px;">
+              <input
+                type="text"
+                class="field-input"
+                id="spotify-url-input"
+                placeholder="Paste public Spotify playlist URL (e.g., https://open.spotify.com/playlist/...)"
+                style="flex: 1;"
+              />
+              <button class="primary-btn" id="btn-add-spotify">Import & Sync</button>
+            </div>
+            <div class="spotify-feedback" id="spotify-feedback" style="margin-top: 8px; font-size: 12px;"></div>
+          </div>
+
+          <!-- Playlists Grid -->
+          <div class="spotify-playlists-section" id="spotify-playlists-section">
+            <div class="spotify-section-title-row" style="display: flex; justify-content: space-between; align-items: center; margin: 24px 0 12px;">
+              <h2 class="settings-section" style="margin-bottom: 0;">Your Playlists</h2>
+            </div>
+            
+            <div class="spotify-playlists-grid" id="spotify-playlists-grid" class="results-grid">
+              <div class="empty-state">
+                <div class="es-icon">📻</div>
+                <div class="es-text">No playlists synced yet</div>
+                <div class="es-sub">Enter a public Spotify playlist link above to sync all its tracks.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Playlist Tracks View (hidden by default) -->
+          <div class="spotify-tracks-section" id="spotify-tracks-section" style="display: none;">
+            <div class="spotify-tracks-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+              <button class="ghost-btn" id="btn-close-tracks">← Back to Playlists</button>
+              <h2 class="active-playlist-title" id="active-playlist-title" style="font-size: 20px; font-weight: 700; margin: 0 16px; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Playlist Name</h2>
+              <button class="ghost-btn" id="btn-sync-playlist">🔄 Sync Now</button>
+            </div>
+            <p class="spotify-tracks-desc" id="active-playlist-desc" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;"></p>
+            <div class="spotify-track-list track-list" id="spotify-track-list">
+              <!-- tracks will go here -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── SETTINGS ── -->
+      <section class="view" id="view-settings">
+        <div class="view-header">
+          <h1 class="view-title">Settings</h1>
+        </div>
+
+        <!-- Essential: Discord Server & Channel -->
+        <div class="settings-card">
+          <h2 class="settings-section">🎵 Discord Server</h2>
+
+          <div class="field">
+            <label class="field-label">Invite Bot to Your Server</label>
+            <button class="primary-btn" id="btn-invite-bot" style="width:100%;">🔗 Add Bot to Discord Server</button>
+            <span class="field-hint">Opens Discord in your browser to add the bot to your server. Do this first if the bot isn't in your server yet.</span>
+          </div>
+
+          <div class="field" style="margin-top: 16px;">
+            <label class="field-label" for="set-guild-id">Server</label>
+            <div class="field-row" style="display: flex; gap: 8px;">
+              <input class="field-input" id="set-guild-id" type="text" placeholder="Auto-detected on first launch" />
+              <button class="ghost-btn" id="btn-load-guilds">Load Servers</button>
+            </div>
+            <div id="guild-list" class="guild-chips"></div>
+            <span class="field-hint">Click "Load Servers" after inviting the bot. Auto-detected if the bot is in one server.</span>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="set-channel-id">Voice Channel</label>
+            <div class="field-row" style="display: flex; gap: 8px;">
+              <input class="field-input" id="set-channel-id" type="text" placeholder="Auto-detected on first launch" />
+              <button class="ghost-btn" id="btn-load-channels">Load Channels</button>
+            </div>
+            <div id="channel-list" class="guild-chips"></div>
+            <span class="field-hint">The voice channel the bot will join when you play music.</span>
+          </div>
+        </div>
+
+        <!-- Preferences -->
+        <div class="settings-card">
+          <h2 class="settings-section">⚡ Preferences</h2>
+
+          <div class="field">
+            <label class="toggle-row">
+              <span>Auto-start bot when app opens</span>
+              <label class="toggle">
+                <input type="checkbox" id="set-auto-start-bot" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+
+          <div class="field">
+            <label class="toggle-row">
+              <span>Auto-join voice channel on startup</span>
+              <label class="toggle">
+                <input type="checkbox" id="set-auto-join-vc" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+          </div>
+
+          <div class="field">
+            <label class="toggle-row">
+              <span>Show what you're listening to in Discord</span>
+              <label class="toggle">
+                <input type="checkbox" id="set-rich-presence" />
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <span class="field-hint">Discord Rich Presence — your profile shows "Listening to Scify Music".</span>
+          </div>
+        </div>
+
+        <!-- Spotify -->
+        <div class="settings-card">
+          <h2 class="settings-section">🟢 Spotify Sync</h2>
+          
+          <div class="field">
+            <label class="field-label" for="set-spotify-interval">Auto-Sync Interval</label>
+            <select class="field-input" id="set-spotify-interval" style="background: var(--bg-base); border: 1px solid var(--border); color: var(--text-primary);">
+              <option value="6">Every 6 Hours</option>
+              <option value="12">Every 12 Hours</option>
+              <option value="24" selected>Every 24 Hours (Daily)</option>
+              <option value="48">Every 48 Hours</option>
+            </select>
+          </div>
+          
+          <div class="field">
+            <div class="spotify-sync-meta" style="font-size: 12px; color: var(--text-secondary);">
+              <span>Last synced: <strong id="spotify-last-sync-time">Never</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bot Logs -->
+        <div class="settings-card" style="max-width: 800px;">
+          <h2 class="settings-section">📋 Bot Console</h2>
+          <div class="field">
+            <textarea class="log-viewer" id="bot-log-viewer" readonly placeholder="Bot logs will appear here when running..." style="width: 100%; height: 160px; background: #08080a; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; color: #22c55e; font-family: monospace; font-size: 11px; line-height: 1.4; resize: vertical; overflow-y: auto; outline: none;"></textarea>
+            <div class="field-row" style="margin-top: 8px; display: flex; gap: 8px;">
+              <button class="primary-btn" id="btn-start-bot-process">Start Bot</button>
+              <button class="ghost-btn" id="btn-stop-bot-process">Stop Bot</button>
+              <button class="ghost-btn" id="btn-clear-logs">Clear Logs</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Advanced (collapsed by default) -->
+        <div class="settings-card">
+          <h2 class="settings-section" style="cursor: pointer;" onclick="document.getElementById('advanced-settings').style.display = document.getElementById('advanced-settings').style.display === 'none' ? 'block' : 'none'">
+            🔧 Advanced <span style="font-size: 11px; color: var(--text-secondary);">(VPS / power users — click to expand)</span>
+          </h2>
+          <div id="advanced-settings" style="display: none;">
+            <div class="field">
+              <label class="field-label" for="set-api-url">Bot API URL</label>
+              <input class="field-input" id="set-api-url" type="text" placeholder="http://127.0.0.1:3456" />
+              <span class="field-hint">Only change if the bot runs on a remote server.</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="set-api-secret">API Secret</label>
+              <input class="field-input" id="set-api-secret" type="password" placeholder="Leave empty for local use" />
+              <span class="field-hint">Only needed if API_SECRET is set in the bot's .env.</span>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="set-bot-folder">Bot Directory</label>
+              <input class="field-input" id="set-bot-folder" type="text" placeholder="Auto-detected" />
+              <span class="field-hint">Path to the directory containing bot.js.</span>
+            </div>
+
+            <div class="field" style="margin-top: 16px;">
+              <h3 style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">📺 YouTube Authentication (VPS only)</h3>
+              <div class="yt-auth-status-container" style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 4px;">
+                <span style="color: var(--text-secondary);">Status:</span>
+                <span class="yt-auth-badge" id="yt-auth-status-badge" style="font-weight: 700; color: #a1a1aa; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.06); font-size: 11px;">Checking…</span>
+              </div>
+              <span class="field-hint">Only needed on VPS/datacenter IPs where YouTube blocks requests. Not needed on home PCs.</span>
+              <div class="field-row" style="margin-top: 8px; display: flex; gap: 8px;">
+                <button class="ghost-btn" id="btn-yt-login">Login with YouTube</button>
+                <button class="ghost-btn" id="btn-yt-logout" style="display:none">Clear Auth</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-footer">
+          <button class="primary-btn" id="btn-save-settings">Save Settings</button>
+          <span class="save-msg" id="save-msg"></span>
+          <div class="connection-test" id="connection-test-area"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Now Playing mini-bar (always visible at the bottom) -->
+  <div class="mini-bar" id="mini-bar">
+    <div class="mini-art">
+      <img id="mini-art-img" src="" alt="" />
+      <div class="mini-art-placeholder">🎵</div>
+    </div>
+    <div class="mini-info">
+      <div class="mini-title" id="mini-title">Not connected</div>
+      <div class="mini-sub" id="mini-sub">—</div>
+    </div>
+    <div class="mini-controls">
+      <button class="mini-btn" id="mini-back" title="Back 15s">⏮</button>
+      <button class="mini-btn mini-play" id="mini-playpause" title="Play/Pause">▶</button>
+      <button class="mini-btn" id="mini-skip" title="Skip">⏭</button>
+    </div>
+    <div class="mini-progress">
+      <div class="mini-progress-fill" id="mini-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- YouTube Device Login Modal -->
+  <div class="modal-overlay" id="yt-auth-modal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>YouTube Device Authentication</h2>
+        <button class="modal-close" id="btn-close-yt-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p>Please authorize this application to stream YouTube audio using your account. This prevents age-restriction blocks and YouTube rate limits.</p>
+        
+        <div class="device-code-box">
+          <div class="device-code-label">Verification Code</div>
+          <div class="device-code-value" id="yt-device-code">XXXX-XXXX</div>
+        </div>
+
+        <div class="device-instructions">
+          <p>1. Go to <a class="yt-link" id="yt-device-url" href="#" target="_blank">https://www.google.com/device</a></p>
+          <p>2. Enter the code shown above.</p>
+          <p>3. Confirm permissions in your browser.</p>
+        </div>
+
+        <div class="modal-spinner-row">
+          <div class="spinner"></div>
+          <span>Waiting for you to complete authorization...</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="ghost-btn" id="btn-cancel-yt-auth">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

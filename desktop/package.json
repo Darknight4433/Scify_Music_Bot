@@ -1,0 +1,46 @@
+{
+  "name": "scify-music",
+  "version": "1.0.0",
+  "description": "Scify Music — Desktop app for Discord music bot control",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --dir && powershell Compress-Archive -Path dist/win-unpacked/* -DestinationPath 'dist/Scify-Music.zip' -Force",
+    "build:dir": "electron-builder --win --dir"
+  },
+
+  "build": {
+    "appId": "com.scify.music",
+    "productName": "Scify Music",
+    "icon": "assets/icon.png",
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "sign": false,
+      "signingHashAlgorithms": []
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "rpc.js",
+      "spotify.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ]
+  },
+  "dependencies": {
+    "discord-rpc": "^4.0.1",
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  }
+
+}

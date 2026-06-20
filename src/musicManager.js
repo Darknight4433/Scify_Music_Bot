@@ -10,15 +10,30 @@ import {
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import process from 'node:process';
 import { createOpusStream } from './stream.js';
 import { store } from './store.js';
 import { getNextProxy, reportSuccess, reportFailure, PROXY_POOL } from './proxy.js';
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
 
-// Use system-installed yt-dlp (must be in PATH on the VPS).
-const YT_DLP = process.env.YT_DLP_PATH || 'yt-dlp';
+// Resolve yt-dlp: prefer bundled binary from youtube-dl-exec, fall back to system PATH.
+function resolveYtDlp() {
+  if (process.env.YT_DLP_PATH) return process.env.YT_DLP_PATH;
+  try {
+    const pkgJson = require.resolve('youtube-dl-exec/package.json');
+    const pkgDir = path.dirname(pkgJson);
+    const binName = process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp';
+    const bundled = path.join(pkgDir, 'bin', binName);
+    if (existsSync(bundled)) return bundled;
+  } catch { /* package not installed */ }
+  return 'yt-dlp'; // system PATH
+}
+
+const YT_DLP = resolveYtDlp();
 const COOKIES_FILE = process.env.YT_COOKIES_FILE;
 
 function baseArgs(proxy) {

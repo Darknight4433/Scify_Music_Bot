@@ -15,6 +15,7 @@ import {
 import { MusicManager, resolveTracks } from './musicManager.js';
 import { buildPanelEmbed, buildPanelComponents, buildQueueView, buildLibraryView, formatTime } from './ui.js';
 import { store } from './store.js';
+import { startApiServer } from './api.js';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const ACCESS_ROLE_ID = process.env.ACCESS_ROLE_ID;
@@ -102,6 +103,8 @@ client.once(Events.ClientReady, async (c) => {
       console.error(`Failed to register commands in ${guild.id}:`, err.message);
     }
   }
+  // Start the REST API bridge for the desktop app.
+  startApiServer(music, store, c);
 });
 
 client.on(Events.GuildCreate, async (guild) => {
