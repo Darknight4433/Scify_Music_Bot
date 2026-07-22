@@ -12,6 +12,7 @@
  *  - YouTube OAuth login flow
  */
 
+import crypto from 'node:crypto';
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
@@ -20,9 +21,21 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import Store from 'electron-store';
 import { updatePresence, clearPresence, connectRPC, disconnectRPC } from './rpc.js';
 import { fetchPlaylistTracks, syncAllPlaylists, scheduleDailySync, stopSync } from './spotify.js';
+import { createTray } from './tray.js';
+import { registerMediaKeys, unregisterMediaKeys } from './mediaKeys.js';
+import { showNowPlayingNotification } from './notifications.js';
+import { createReconnectManager } from './reconnect.js';
+import { createRecoveryManager } from './recovery.js';
+import { createLogger } from './logger.js';
+import { deserializePlaylist, upsertPlaylist } from './playlistStore.js';
+import { fetchYouTubePlaylist } from './youtube.js';
+import { createLocalAudioPipeline } from './localAudio.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ── Structured logger ────────────────────────────────────────────────────────
+const logger = createLogger();
 
 // ── Persistent settings ──────────────────────────────────────────────────────
 const settings = new Store({
@@ -39,15 +52,44 @@ const settings = new Store({
     spotifyPlaylists: [],
     spotifyLastSync: null,
     spotifySyncIntervalHours: 24,
+    playlists: [],
+    likedSongs: [],
+    playlistViewMode: 'list',
+    playlistLastSort: 'custom',
+    localVolume: 80,
+    playbackMode: 'discord',
   },
 });
 
 let mainWindow = null;
 let pollInterval = null;
 let lastStatus = null;
+let lastPlayingTitle = null;
 let botProcess = null;
 let botOnline = false;
 let autoJoinDone = false;
+let isQuitting = false;
+let trayManager = null;
+let reconnectManager = null;
+let recoveryManager = null;
+let localAudioPipeline = null;
+
+// ── Single instance lock ──────────────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running — quit this one
+  app.quit();
+} else {
+  // When a second instance is attempted, focus the existing window
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 // ── Window creation ──────────────────────────────────────────────────────────
 function createWindow() {
@@ -67,6 +109,15 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Intercept close to hide window instead of quitting (minimize-to-tray)
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -123,6 +174,11 @@ function spawnBot() {
     botProcess = null;
     botOnline = false;
     mainWindow?.webContents.send('bot-status', code === 0 ? 'stopped' : 'error');
+
+    // Trigger crash recovery for non-zero exits when not intentionally quitting
+    if (code !== 0 && !isQuitting && recoveryManager) {
+      recoveryManager.handleExit(code);
+    }
   });
 
   botProcess.on('error', (err) => {
@@ -219,6 +275,62 @@ async function autoConfigureGuild() {
 app.whenReady().then(async () => {
   createWindow();
 
+  // Create local audio pipeline for speaker playback
+  localAudioPipeline = createLocalAudioPipeline(mainWindow, settings);
+
+  // Register IPC handlers for local audio playback
+  ipcMain.handle('local-play', (_e, url, seekSeconds) => localAudioPipeline.play(url, seekSeconds));
+  ipcMain.handle('local-stop', () => localAudioPipeline.stop());
+
+  // Create system tray icon with context menu
+  trayManager = createTray({
+    iconPath: path.join(__dirname, 'assets', 'tray-icon.png'),
+    window: mainWindow,
+    onPlay: () => apiRequest('POST', '/resume', { guildId: settings.get('guildId') }).catch(() => {}),
+    onPause: () => apiRequest('POST', '/pause', { guildId: settings.get('guildId') }).catch(() => {}),
+    onSkip: () => apiRequest('POST', '/skip', { guildId: settings.get('guildId') }).catch(() => {}),
+    onOpen: () => { mainWindow?.show(); mainWindow?.focus(); },
+    onExit: async () => {
+      isQuitting = true;
+      const guildId = settings.get('guildId');
+      if (guildId) {
+        await apiRequest('POST', '/disconnect', { guildId }).catch(() => {});
+      }
+      killBot();
+      app.quit();
+    },
+  });
+
+  // Register global media keys for playback control
+  const mediaKeyHandlers = {
+    onPlayPause: async () => {
+      const guildId = settings.get('guildId');
+      if (!guildId) return;
+      try {
+        const status = await apiRequest('GET', `/status?guildId=${encodeURIComponent(guildId)}`);
+        if (status.paused) {
+          await apiRequest('POST', '/resume', { guildId });
+        } else {
+          await apiRequest('POST', '/pause', { guildId });
+        }
+      } catch {}
+    },
+    onNextTrack: () => {
+      const guildId = settings.get('guildId');
+      if (guildId) apiRequest('POST', '/skip', { guildId }).catch(() => {});
+    },
+    onPreviousTrack: () => {
+      const guildId = settings.get('guildId');
+      if (guildId) apiRequest('POST', '/seek', { guildId, position: 0 }).catch(() => {});
+    },
+  };
+  registerMediaKeys(mediaKeyHandlers);
+
+  // Re-attempt media key registration when window is restored from tray
+  mainWindow.on('show', () => {
+    registerMediaKeys(mediaKeyHandlers);
+  });
+
   // Check if the bot token exists — only auto-start if setup is done
   const botDir = settings.get('botFolder');
   const envPath = path.join(botDir, '.env');
@@ -234,6 +346,44 @@ app.whenReady().then(async () => {
   if (settings.get('autoStartBot') && hasToken) {
     spawnBot();
   }
+
+  // Create reconnect manager for network resilience
+  reconnectManager = createReconnectManager({
+    logger,
+    onStatusChange: (status) => {
+      mainWindow?.webContents.send('network-status', status);
+    },
+    onReconnect: async () => {
+      // Restart bot and rejoin VC
+      killBot();
+      await new Promise(r => setTimeout(r, 1000));
+      spawnBot();
+      // The bot's stdout handler already triggers autoJoinVc when it detects "Logged in"
+    },
+    maxRetries: 5,
+    baseDelay: 5000,
+    maxDelay: 60000,
+  });
+  reconnectManager.start();
+
+  // IPC handlers for network state from renderer
+  ipcMain.on('network-offline', () => reconnectManager.triggerOffline());
+  ipcMain.on('network-online', () => reconnectManager.triggerOnline());
+
+  // Create crash recovery manager for automatic bot restarts
+  recoveryManager = createRecoveryManager({
+    logger,
+    spawnBot: () => {
+      spawnBot();
+      return botProcess;
+    },
+    onStatusChange: (status) => {
+      mainWindow?.webContents.send('crash-recovery', { event: status });
+    },
+    crashThreshold: 3,
+    crashWindow: 60000,
+    restartDelay: 3000,
+  });
 
   // Try to connect Discord RPC
   if (settings.get('richPresence')) {
@@ -268,8 +418,23 @@ app.on('window-all-closed', async () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+  // Stop local audio pipeline processes on quit
+  localAudioPipeline?.stop();
+  // Destroy tray icon to prevent ghost icons in the system tray
+  if (trayManager) {
+    trayManager.destroy();
+    trayManager = null;
+  }
+});
+
 app.on('activate', () => {
   if (!mainWindow) createWindow();
+});
+
+app.on('will-quit', () => {
+  unregisterMediaKeys();
 });
 
 // ── Bot API polling ──────────────────────────────────────────────────────────
@@ -305,8 +470,32 @@ async function pollStatus() {
     if (statusStr !== lastStatus) {
       lastStatus = statusStr;
       mainWindow?.webContents.send('status-update', status);
+
+      // Update tray now-playing display
+      if (trayManager) {
+        trayManager.updateNowPlaying(status.current?.title || null);
+      }
+
+      // Show notification on track change
+      const currentTitle = status.current?.title || null;
+      if (currentTitle && currentTitle !== lastPlayingTitle) {
+        showNowPlayingNotification({
+          title: currentTitle,
+          onActivated: () => { mainWindow?.show(); mainWindow?.focus(); },
+        });
+      }
+      lastPlayingTitle = currentTitle;
+
       if (settings.get('richPresence') && status.playing && status.current) {
-        updatePresence({ title: status.current.title, positionSec: status.positionSec, durationSec: status.durationSec, paused: status.paused }).catch(() => {});
+        console.log('[RPC] Updating presence:', status.current.title);
+        updatePresence({
+          title: status.current.title,
+          positionSec: status.positionSec,
+          durationSec: status.durationSec,
+          paused: status.paused,
+          channelName: status.channelName || null,
+          queueLength: status.queue?.length || 0,
+        }).catch((e) => console.warn('[RPC] updatePresence error:', e.message));
       } else if (!status.playing) {
         clearPresence().catch(() => {});
       }
@@ -478,6 +667,203 @@ ipcMain.handle('spotify-sync', async () => {
 ipcMain.handle('yt-auth-start',  () => apiRequest('POST', '/yt-auth/start'));
 ipcMain.handle('yt-auth-status', () => apiRequest('GET',  '/yt-auth/status'));
 ipcMain.handle('yt-auth-cancel', () => apiRequest('POST', '/yt-auth/cancel'));
+
+// ── Playlist management IPC handlers ─────────────────────────────────────────
+
+// Import a Spotify playlist into the unified playlists store
+ipcMain.handle('playlist-import-spotify', async (_e, url) => {
+  try {
+    const result = await fetchPlaylistTracks(url);
+    const now = result.syncedAt || Date.now();
+
+    // Normalize into StoredPlaylist schema
+    const playlist = {
+      id: result.id,
+      name: result.name,
+      description: result.description || '',
+      coverUrl: result.coverUrl || null,
+      source: 'spotify',
+      sourceUrl: url,
+      trackCount: result.tracks.length,
+      tracks: result.tracks.map((t) => ({
+        title: t.title || '',
+        artist: t.artist || '',
+        album: t.album || '',
+        durationMs: t.durationMs || 0,
+        thumbnail: t.thumbnail || null,
+        query: t.query || '',
+        addedAt: now,
+      })),
+      syncedAt: now,
+    };
+
+    // Upsert into the unified playlists array
+    const playlists = settings.get('playlists') || [];
+    const updated = upsertPlaylist(playlists, playlist);
+    settings.set('playlists', updated);
+
+    // Return metadata without the tracks array for response size
+    const { tracks, ...metadata } = playlist;
+    return { ok: true, playlist: metadata };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Import a YouTube playlist via bot API (yt-dlp)
+ipcMain.handle('playlist-import-youtube', async (_e, url) => {
+  try {
+    const playlist = await fetchYouTubePlaylist(url, apiRequest);
+    const updatedPlaylists = upsertPlaylist(settings.get('playlists') || [], playlist);
+    settings.set('playlists', updatedPlaylists);
+    // Return metadata only (without tracks) to keep response size small
+    const { tracks, ...metadata } = playlist;
+    return { ok: true, playlist: metadata };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Get all playlists (metadata only, without tracks array for performance)
+ipcMain.handle('playlist-get-all', () => {
+  const playlists = settings.get('playlists') || [];
+  return playlists.map((p) => {
+    const deserialized = deserializePlaylist(p);
+    // Return without the tracks array for list view performance
+    const { tracks, ...metadata } = deserialized;
+    return metadata;
+  });
+});
+
+// Get full track list for a specific playlist ID (includes metadata for detail view)
+ipcMain.handle('playlist-get-tracks', (_e, playlistId) => {
+  const playlists = settings.get('playlists') || [];
+  const raw = playlists.find((p) => p.id === playlistId);
+  if (!raw) return { ok: false, error: 'Playlist not found' };
+  const deserialized = deserializePlaylist(raw);
+  return {
+    ok: true,
+    id: deserialized.id,
+    name: deserialized.name,
+    coverUrl: deserialized.coverUrl,
+    source: deserialized.source,
+    trackCount: deserialized.trackCount,
+    tracks: deserialized.tracks,
+  };
+});
+
+// Remove a playlist from the store
+ipcMain.handle('playlist-remove', (_e, playlistId) => {
+  const playlists = (settings.get('playlists') || []).filter((p) => p.id !== playlistId);
+  settings.set('playlists', playlists);
+  return { ok: true };
+});
+
+// Get the persisted view mode preference (returns object with viewMode + sortCriterion)
+ipcMain.handle('playlist-get-view-mode', () => {
+  return {
+    viewMode: settings.get('playlistViewMode') || 'list',
+    sortCriterion: settings.get('playlistLastSort') || 'custom',
+  };
+});
+
+// Set the view mode preference (accepts object or string for backward compat)
+ipcMain.handle('playlist-set-view-mode', (_e, mode) => {
+  if (typeof mode === 'object' && mode !== null) {
+    if (mode.viewMode === 'list' || mode.viewMode === 'compact') {
+      settings.set('playlistViewMode', mode.viewMode);
+    }
+    if (mode.sortCriterion && typeof mode.sortCriterion === 'string') {
+      settings.set('playlistLastSort', mode.sortCriterion);
+    }
+  } else if (mode === 'list' || mode === 'compact') {
+    settings.set('playlistViewMode', mode);
+  }
+  return { ok: true };
+});
+
+// ── Custom Playlist & Liked Songs IPC handlers ───────────────────────────────
+
+// Create a new custom playlist
+ipcMain.handle('playlist-create', (_e, name, description) => {
+  const playlist = {
+    id: crypto.randomUUID(),
+    name: name || 'Untitled Playlist',
+    description: description || '',
+    coverUrl: null,
+    source: 'custom',
+    sourceUrl: '',
+    trackCount: 0,
+    tracks: [],
+    syncedAt: Date.now(),
+    url: '',
+  };
+  const playlists = settings.get('playlists') || [];
+  playlists.push(playlist);
+  settings.set('playlists', playlists);
+  const { tracks, ...metadata } = playlist;
+  return { ok: true, playlist: metadata };
+});
+
+// Add a track to a specific playlist by ID
+ipcMain.handle('playlist-add-track', (_e, playlistId, track) => {
+  const playlists = settings.get('playlists') || [];
+  const idx = playlists.findIndex((p) => p.id === playlistId);
+  if (idx < 0) return { ok: false, error: 'Playlist not found' };
+  const playlist = playlists[idx];
+  if (!playlist.tracks) playlist.tracks = [];
+  playlist.tracks.push(track);
+  playlist.trackCount = playlist.tracks.length;
+  playlists[idx] = playlist;
+  settings.set('playlists', playlists);
+  return { ok: true };
+});
+
+// Remove a track from a playlist by index
+ipcMain.handle('playlist-remove-track', (_e, playlistId, index) => {
+  const playlists = settings.get('playlists') || [];
+  const idx = playlists.findIndex((p) => p.id === playlistId);
+  if (idx < 0) return { ok: false, error: 'Playlist not found' };
+  const playlist = playlists[idx];
+  if (!playlist.tracks || index < 0 || index >= playlist.tracks.length) {
+    return { ok: false, error: 'Invalid track index' };
+  }
+  playlist.tracks.splice(index, 1);
+  playlist.trackCount = playlist.tracks.length;
+  playlists[idx] = playlist;
+  settings.set('playlists', playlists);
+  return { ok: true };
+});
+
+// Get liked songs
+ipcMain.handle('liked-songs-get', () => {
+  return settings.get('likedSongs') || [];
+});
+
+// Add a song to liked songs
+ipcMain.handle('liked-songs-add', (_e, track) => {
+  const liked = settings.get('likedSongs') || [];
+  // Avoid duplicates by query
+  if (liked.some((t) => t.query === track.query)) {
+    return { ok: true, alreadyLiked: true };
+  }
+  liked.push(track);
+  settings.set('likedSongs', liked);
+  return { ok: true };
+});
+
+// Remove a song from liked songs by query match
+ipcMain.handle('liked-songs-remove', (_e, query) => {
+  const liked = (settings.get('likedSongs') || []).filter((t) => t.query !== query);
+  settings.set('likedSongs', liked);
+  return { ok: true };
+});
+
+// Check if a song is liked by query
+ipcMain.handle('liked-songs-check', (_e, query) => {
+  const liked = settings.get('likedSongs') || [];
+  return { liked: liked.some((t) => t.query === query) };
+});
 
 // ── API request helper ────────────────────────────────────────────────────────
 async function apiRequest(method, urlPath, body) {

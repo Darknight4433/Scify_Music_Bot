@@ -6,10 +6,10 @@
   "type": "module",
   "scripts": {
     "start": "electron .",
+    "test": "vitest run",
     "build": "electron-builder --win --dir && powershell Compress-Archive -Path dist/win-unpacked/* -DestinationPath 'dist/Scify-Music.zip' -Force",
     "build:dir": "electron-builder --win --dir"
   },
-
   "build": {
     "appId": "com.scify.music",
     "productName": "Scify Music",
@@ -18,7 +18,9 @@
       "target": [
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "sign": false,
@@ -29,6 +31,14 @@
       "preload.js",
       "rpc.js",
       "spotify.js",
+      "youtube.js",
+      "playlistStore.js",
+      "tray.js",
+      "notifications.js",
+      "mediaKeys.js",
+      "reconnect.js",
+      "recovery.js",
+      "logger.js",
       "renderer/**/*",
       "assets/**/*"
     ]
@@ -40,7 +50,8 @@
   "devDependencies": {
     "cross-env": "^7.0.3",
     "electron": "^30.0.0",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "fast-check": "^3.23.2",
+    "vitest": "^2.1.9"
   }
-
 }

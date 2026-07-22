@@ -109,6 +109,42 @@ async function ytDlpPlaylist(url) {
 }
 
 /**
+ * Resolve a YouTube playlist URL into full metadata for the desktop app's
+ * playlist import feature.
+ * Returns { playlistId, title, thumbnail, tracks: [{ title, artist, channel, durationSec, url, thumbnail }] }.
+ */
+export async function resolvePlaylistMeta(url) {
+  const entries = await ytDlpPlaylist(url);
+  if (!entries || entries.length === 0) {
+    throw new Error('Playlist is empty or could not be resolved.');
+  }
+
+  // Extract playlistId from URL
+  const listMatch = url.match(/[?&]list=([^&]+)/);
+  const playlistId = listMatch ? listMatch[1] : entries[0]?.playlist_id || 'unknown';
+
+  const playlistTitle = entries[0]?.playlist_title || 'Unknown Playlist';
+
+  // Use the first entry's thumbnail as the playlist thumbnail
+  const playlistThumbnail = entries[0]?.thumbnails?.length
+    ? entries[0].thumbnails[entries[0].thumbnails.length - 1].url
+    : null;
+
+  const tracks = entries.map((e) => ({
+    title: e.title || 'Unknown',
+    artist: e.channel || e.uploader || '',
+    channel: e.channel || e.uploader || '',
+    durationSec: e.duration ?? 0,
+    url: e.url || (e.id ? `https://www.youtube.com/watch?v=${e.id}` : ''),
+    thumbnail: e.thumbnails?.length
+      ? e.thumbnails[e.thumbnails.length - 1].url
+      : (e.id ? `https://img.youtube.com/vi/${e.id}/mqdefault.jpg` : null),
+  }));
+
+  return { playlistId, title: playlistTitle, thumbnail: playlistThumbnail, tracks };
+}
+
+/**
  * Resolve a YouTube / YouTube Music URL or search term into one or more tracks.
  * Uses yt-dlp for all lookups so everything goes through the proxy.
  * Returns { tracks: [{ url, title, durationInSec }], label }.
@@ -187,7 +223,8 @@ class GuildMusicState {
         this.seeking = false;
         return;
       }
-      this.advance().catch((err) => console.error('advance error:', err));
+      console.log(`[player ${this.guildId}] Track ended, advancing to next...`);
+      this.advance().catch((err) => console.error(`[player ${this.guildId}] advance error:`, err));
     });
 
     this.player.on('stateChange', (oldState, newState) => {
@@ -292,11 +329,13 @@ class GuildMusicState {
         this.cleanupStream = null;
       }
       this.lockHolderId = null;
+      console.log(`[player ${this.guildId}] Queue empty, playback ended.`);
       return;
     }
 
     this.current = track;
     this.playing = true;
+    console.log(`[player ${this.guildId}] Now playing: "${track.title}"`);
     // Record this track in the guild's history and persist the session.
     store.addHistory(this.guildId, track);
 
@@ -307,7 +346,7 @@ class GuildMusicState {
     } catch (err) {
       // Extraction failed (e.g. bot check, deleted/age-restricted video).
       this.failStreak = (this.failStreak ?? 0) + 1;
-      console.error(`Failed to play "${track.title}": ${err.message}`);
+      console.error(`[player ${this.guildId}] Failed to play "${track.title}": ${err.message}`);
 
       // A bot check fails every track, so don't churn the whole queue —
       // stop after a few consecutive failures and report it.
@@ -316,6 +355,7 @@ class GuildMusicState {
         throw err;
       }
       // Otherwise skip this track and try the next one.
+      console.log(`[player ${this.guildId}] Skipping to next track...`);
       await this.playNext();
     }
   }

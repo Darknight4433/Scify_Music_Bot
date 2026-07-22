@@ -11,7 +11,7 @@ import DiscordRPC from 'discord-rpc';
 
 // You can use this public test client ID or register your own app at
 // https://discord.com/developers/applications — it's free.
-const CLIENT_ID = '1284248225097064530'; // Replace with your own Discord app's client ID
+const CLIENT_ID = '1517195164064550993'; // Scify Music bot's application client ID
 
 const rpc = new DiscordRPC.Client({ transport: 'ipc' });
 let connected = false;
@@ -52,28 +52,35 @@ export async function disconnectRPC() {
 
 /**
  * Update the user's Discord Rich Presence.
- * @param {{ title: string, positionSec: number, durationSec: number, paused: boolean }} opts
+ * @param {{ title: string, positionSec: number, durationSec: number, paused: boolean, channelName?: string, queueLength?: number }} opts
  */
-export async function updatePresence({ title, positionSec, durationSec, paused }) {
+export async function updatePresence({ title, positionSec, durationSec, paused, channelName, queueLength }) {
   if (!connected) return;
 
   const now = Date.now();
   const startTimestamp = paused ? undefined : new Date(now - positionSec * 1000);
-  const endTimestamp =
-    !paused && durationSec > 0
-      ? new Date(now + (durationSec - positionSec) * 1000)
-      : undefined;
+
+  // Build state field: prefer channel name with optional queue info,
+  // fall back to paused/playing text for backward compatibility
+  let state;
+  if (channelName) {
+    if (queueLength != null && queueLength > 0) {
+      state = `${channelName} • ${queueLength} in queue`;
+    } else {
+      state = channelName;
+    }
+  } else {
+    state = paused ? '⏸ Paused' : '🎵 Playing in Discord VC';
+  }
 
   try {
     await rpc.setActivity({
+      type: 2, // Listening — coexists with "Playing" activities (Req 5.7)
       details: truncate(title, 128),
-      state: paused ? '⏸ Paused' : '▶ Playing in Discord VC',
+      state,
       largeImageKey: 'scify_logo',
       largeImageText: 'Scify Music',
-      smallImageKey: paused ? 'paused' : 'playing',
-      smallImageText: paused ? 'Paused' : 'Playing',
       startTimestamp,
-      endTimestamp,
       instance: false,
     });
   } catch (err) {

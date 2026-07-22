@@ -214,6 +214,89 @@ export function startApiServer(music, store, discordClient) {
     }
   });
 
+  // ── POST /play-batch — enqueue multiple tracks at once ───────────────────────
+  // Accepts an array of queries, resolves the first one to start playback,
+  // then enqueues the rest without individual resolution (uses query as-is).
+  app.post('/play-batch', async (req, res) => {
+    const { guildId, channelId, queries, requestedBy } = req.body ?? {};
+    if (!guildId || !queries || !Array.isArray(queries) || queries.length === 0) {
+      return res.status(400).json({ error: 'guildId and queries[] are required' });
+    }
+
+    const guild = discordClient.guilds.cache.get(guildId);
+    if (!guild) return res.status(404).json({ error: 'Guild not found' });
+
+    let voiceChannel = null;
+    if (channelId) voiceChannel = guild.channels.cache.get(channelId);
+    if (!voiceChannel) {
+      for (const [, ch] of guild.channels.cache) {
+        if ((ch.type === 2 || ch.type === 13) && ch.members.filter(m => !m.user.bot).size > 0) {
+          voiceChannel = ch;
+          break;
+        }
+      }
+    }
+    if (!voiceChannel) {
+      return res.status(404).json({ error: 'No voice channel found. Join a VC first!' });
+    }
+
+    try {
+      const { resolveTracks } = await import('./musicManager.js');
+      const requester = requestedBy || 'Scify App';
+      const state = music.get(guildId);
+      state.textChannel = null;
+      if (!state.connection || state.voiceChannelId !== voiceChannel.id) {
+        state.connect(voiceChannel);
+      }
+
+      // Resolve and play the first track
+      const { tracks: firstTracks } = await resolveTracks(queries[0], requester);
+      state.enqueue(firstTracks);
+      await state.start();
+
+      // Enqueue remaining tracks as unresolved entries (they'll be resolved on play)
+      // For now, enqueue them by resolving in background without blocking response
+      const remaining = queries.slice(1);
+      let enqueued = firstTracks.length;
+
+      // Resolve remaining in background (don't block the response)
+      (async () => {
+        for (const query of remaining) {
+          try {
+            const { tracks } = await resolveTracks(query, requester);
+            state.enqueue(tracks);
+            enqueued += tracks.length;
+          } catch (err) {
+            console.warn(`[API /play-batch] Failed to resolve: ${query} — ${err.message}`);
+          }
+        }
+        console.log(`[API /play-batch] Background enqueue complete: ${enqueued} tracks total`);
+      })();
+
+      res.json({ ok: true, count: queries.length, label: `Queuing ${queries.length} tracks…` });
+    } catch (err) {
+      console.error('[API /play-batch]', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── POST /resolve-playlist — resolve a YouTube playlist into track metadata ──
+  app.post('/resolve-playlist', async (req, res) => {
+    const { url } = req.body ?? {};
+    if (!url) {
+      return res.status(400).json({ error: 'url is required' });
+    }
+
+    try {
+      const { resolvePlaylistMeta } = await import('./musicManager.js');
+      const result = await resolvePlaylistMeta(url);
+      res.json(result);
+    } catch (err) {
+      console.error('[API /resolve-playlist]', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── POST /control — playback actions ─────────────────────────────────────────
   app.post('/control', async (req, res) => {
     const { guildId, action } = req.body ?? {};

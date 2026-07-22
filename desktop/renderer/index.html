@@ -77,8 +77,8 @@
         <a class="nav-item" data-view="library" id="nav-library">
           <span class="nav-icon">📚</span> Library
         </a>
-        <a class="nav-item" data-view="spotify" id="nav-spotify">
-          <span class="nav-icon">💚</span> Spotify Sync
+        <a class="nav-item" data-view="playlists" id="nav-playlists">
+          <span class="nav-icon">🎶</span> Playlists
         </a>
       </div>
 
@@ -206,64 +206,165 @@
         <div id="library-list" class="results-grid"></div>
       </section>
 
-      <!-- ── SPOTIFY SYNC ── -->
-      <section class="view" id="view-spotify">
+      <!-- ── PLAYLISTS (Library View) ── -->
+      <section class="view" id="view-playlists">
         <div class="view-header">
           <div>
-            <h1 class="view-title">Spotify Sync</h1>
-            <p class="view-subtitle">Scrape and sync public Spotify playlists. No account or API keys required!</p>
+            <h1 class="view-title">Your Library</h1>
+            <p class="view-subtitle">Your playlists — imported and custom</p>
           </div>
           <div class="view-actions">
-            <button class="ghost-btn" id="btn-sync-all-spotify" style="display:none">🔄 Sync All Playlists</button>
+            <button class="ghost-btn" id="btn-open-create-playlist">+ Create Playlist</button>
+            <button class="primary-btn" id="btn-open-import-dialog">+ Import Playlist</button>
           </div>
         </div>
 
-        <div class="spotify-sync-container">
-          <!-- Add Playlist Box -->
-          <div class="spotify-add-box-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 24px; max-width: 620px;">
-            <h3 class="settings-section" style="margin-bottom: 12px; font-size: 14px;">🔗 Import Playlist</h3>
-            <div class="field-row" style="display: flex; gap: 8px;">
-              <input
-                type="text"
-                class="field-input"
-                id="spotify-url-input"
-                placeholder="Paste public Spotify playlist URL (e.g., https://open.spotify.com/playlist/...)"
-                style="flex: 1;"
-              />
-              <button class="primary-btn" id="btn-add-spotify">Import & Sync</button>
-            </div>
-            <div class="spotify-feedback" id="spotify-feedback" style="margin-top: 8px; font-size: 12px;"></div>
+        <!-- Liked Songs Card -->
+        <div class="liked-songs-card" id="liked-songs-card" onclick="window.__openLikedSongs()">
+          <div class="liked-songs-icon">❤️</div>
+          <div class="liked-songs-info">
+            <div class="liked-songs-title">Liked Songs</div>
+            <div class="liked-songs-count" id="liked-songs-count">0 songs</div>
           </div>
+        </div>
 
-          <!-- Playlists Grid -->
-          <div class="spotify-playlists-section" id="spotify-playlists-section">
-            <div class="spotify-section-title-row" style="display: flex; justify-content: space-between; align-items: center; margin: 24px 0 12px;">
-              <h2 class="settings-section" style="margin-bottom: 0;">Your Playlists</h2>
-            </div>
-            
-            <div class="spotify-playlists-grid" id="spotify-playlists-grid" class="results-grid">
-              <div class="empty-state">
-                <div class="es-icon">📻</div>
-                <div class="es-text">No playlists synced yet</div>
-                <div class="es-sub">Enter a public Spotify playlist link above to sync all its tracks.</div>
-              </div>
-            </div>
-          </div>
+        <!-- Custom Playlists Section -->
+        <div class="playlist-section-header" id="custom-playlists-header" style="display:none;">
+          <h3 class="playlist-section-title">My Playlists</h3>
+        </div>
+        <div class="playlist-library-grid" id="custom-playlists-grid"></div>
 
-          <!-- Active Playlist Tracks View (hidden by default) -->
-          <div class="spotify-tracks-section" id="spotify-tracks-section" style="display: none;">
-            <div class="spotify-tracks-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-              <button class="ghost-btn" id="btn-close-tracks">← Back to Playlists</button>
-              <h2 class="active-playlist-title" id="active-playlist-title" style="font-size: 20px; font-weight: 700; margin: 0 16px; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Playlist Name</h2>
-              <button class="ghost-btn" id="btn-sync-playlist">🔄 Sync Now</button>
-            </div>
-            <p class="spotify-tracks-desc" id="active-playlist-desc" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;"></p>
-            <div class="spotify-track-list track-list" id="spotify-track-list">
-              <!-- tracks will go here -->
-            </div>
+        <!-- Imported Playlists Section -->
+        <div class="playlist-section-header" id="imported-playlists-header" style="display:none;">
+          <h3 class="playlist-section-title">Imported</h3>
+        </div>
+        <div class="playlist-library-grid" id="imported-playlists-grid"></div>
+
+        <!-- Empty state (shown when no playlists at all) -->
+        <div id="playlists-empty-state" style="display:none;">
+          <div class="empty-state">
+            <div class="es-icon">🎶</div>
+            <div class="es-text">No playlists yet</div>
+            <div class="es-sub">Create a custom playlist or import from Spotify/YouTube.</div>
           </div>
         </div>
       </section>
+
+      <!-- ── PLAYLIST DETAIL VIEW ── -->
+      <section class="view" id="view-playlist-detail">
+        <div class="playlist-detail-header" id="playlist-detail-header">
+          <button class="ghost-btn" id="btn-back-to-playlists">← Back to Playlists</button>
+          <div class="playlist-header-content">
+            <div class="playlist-header-cover">
+              <img class="playlist-cover-img" id="playlist-cover-img" src="" alt="Playlist cover" />
+              <div class="playlist-cover-placeholder" id="playlist-cover-placeholder">🎶</div>
+            </div>
+            <div class="playlist-header-info">
+              <h1 class="playlist-name" id="playlist-detail-name">Playlist Name</h1>
+              <div class="playlist-meta">
+                <span class="playlist-track-count" id="playlist-detail-count">0 tracks</span>
+                <span class="playlist-source-badge" id="playlist-detail-source">spotify</span>
+              </div>
+              <div class="playlist-header-actions">
+                <button class="primary-btn playlist-play-all-btn" id="btn-playlist-play-all">▶ Play All</button>
+                <button class="ghost-btn" id="btn-playlist-queue-all">+ Queue All</button>
+                <button class="ghost-btn playlist-remove-btn" id="btn-playlist-remove" title="Remove Playlist">🗑 Remove</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sort & View Controls -->
+        <div class="playlist-controls-bar">
+          <div class="playlist-sort-wrap">
+            <label class="playlist-sort-label" for="playlist-sort-select">Sort by:</label>
+            <select class="playlist-sort-select" id="playlist-sort-select">
+              <option value="custom">Custom Order</option>
+              <option value="title">Title</option>
+              <option value="artist">Artist</option>
+              <option value="album">Album</option>
+              <option value="recentlyAdded">Recently Added</option>
+              <option value="duration">Duration</option>
+            </select>
+          </div>
+          <div class="playlist-view-toggle" id="playlist-view-toggle">
+            <button class="view-toggle-btn active" data-mode="list" id="btn-view-list">List</button>
+            <button class="view-toggle-btn" data-mode="compact" id="btn-view-compact">Compact</button>
+          </div>
+        </div>
+
+        <!-- Track List (scrollable) -->
+        <div class="playlist-track-list" id="playlist-track-list">
+          <!-- Track rows rendered by JS -->
+        </div>
+      </section>
+
+      <!-- ── PLAYLIST IMPORT DIALOG (modal) ── -->
+      <div class="modal-overlay" id="playlist-import-modal" style="display: none;">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2>Import Playlist</h2>
+            <button class="modal-close" id="btn-close-import-modal">✕</button>
+          </div>
+          <div class="modal-body">
+            <p>Paste a public Spotify or YouTube playlist URL below to import it.</p>
+            <div class="playlist-import-field" style="margin-top: 16px;">
+              <input
+                type="text"
+                class="field-input"
+                id="playlist-import-url"
+                placeholder="https://open.spotify.com/playlist/... or https://youtube.com/playlist?list=..."
+                autocomplete="off"
+              />
+              <div class="playlist-import-source-badge" id="playlist-import-source-badge" style="display:none;">
+                <span id="playlist-import-source-text"></span>
+              </div>
+            </div>
+            <div class="playlist-import-feedback" id="playlist-import-feedback" style="margin-top: 8px; font-size: 12px;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost-btn" id="btn-cancel-import">Cancel</button>
+            <button class="primary-btn" id="btn-confirm-import">Import</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── CREATE PLAYLIST DIALOG (modal) ── -->
+      <div class="modal-overlay" id="create-playlist-modal" style="display: none;">
+        <div class="modal-card">
+          <div class="modal-header">
+            <h2>Create Playlist</h2>
+            <button class="modal-close" id="btn-close-create-modal">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="field" style="margin-bottom: 16px;">
+              <label class="field-label" for="create-playlist-name">Name *</label>
+              <input
+                type="text"
+                class="field-input"
+                id="create-playlist-name"
+                placeholder="My awesome playlist"
+                autocomplete="off"
+              />
+            </div>
+            <div class="field">
+              <label class="field-label" for="create-playlist-desc">Description (optional)</label>
+              <input
+                type="text"
+                class="field-input"
+                id="create-playlist-desc"
+                placeholder="A short description..."
+                autocomplete="off"
+              />
+            </div>
+            <div class="create-playlist-feedback" id="create-playlist-feedback" style="margin-top: 8px; font-size: 12px;"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="ghost-btn" id="btn-cancel-create-playlist">Cancel</button>
+            <button class="primary-btn" id="btn-confirm-create-playlist">Create</button>
+          </div>
+        </div>
+      </div>
 
       <!-- ── SETTINGS ── -->
       <section class="view" id="view-settings">
@@ -432,6 +533,7 @@
       <div class="mini-sub" id="mini-sub">—</div>
     </div>
     <div class="mini-controls">
+      <button class="mini-btn like-btn" id="mini-like-btn" title="Like" onclick="window.__toggleNowPlayingLike()">🤍</button>
       <button class="mini-btn" id="mini-back" title="Back 15s">⏮</button>
       <button class="mini-btn mini-play" id="mini-playpause" title="Play/Pause">▶</button>
       <button class="mini-btn" id="mini-skip" title="Skip">⏭</button>
@@ -473,6 +575,9 @@
     </div>
   </div>
 
+  <script src="playlistSort.js"></script>
+  <script src="playlistRender.js"></script>
+  <script src="playlistPlayback.js"></script>
   <script src="app.js" type="module"></script>
 </body>
 </html>

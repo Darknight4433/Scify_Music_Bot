@@ -141,6 +141,8 @@ export async function createOpusStream(videoUrl, seekSeconds = 0) {
       ffmpeg.on('close', (code) => {
         if (code && code !== 0 && code !== 255) {
           console.error(`FFmpeg exited with code ${code}:`, ffErr.trim().slice(-400));
+        } else {
+          console.log(`[Stream] FFmpeg closed cleanly (code ${code}) for ${videoUrl}`);
         }
       });
 
@@ -148,6 +150,14 @@ export async function createOpusStream(videoUrl, seekSeconds = 0) {
       ytdlp.stdout.pipe(ffmpeg.stdin);
       // Ignore EPIPE when FFmpeg closes stdin early (e.g. on skip/stop).
       ffmpeg.stdin.on('error', () => {});
+
+      // When yt-dlp finishes downloading, close FFmpeg's stdin so it can
+      // flush remaining audio and exit cleanly (triggering AudioPlayer Idle).
+      ytdlp.on('close', () => {
+        if (ffmpeg.stdin && !ffmpeg.stdin.destroyed) {
+          ffmpeg.stdin.end();
+        }
+      });
 
       ffmpeg.stdout.on('close', cleanup);
 
